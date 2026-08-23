@@ -38,4 +38,5 @@ jobs:
       - name: 上传 COS
         run: |
           coscmd upload deploy/data/data.json /data.json
-          coscmd upload deploy/frontend/index.html /index.html
+          coscmd upload deploy/frontend/index.html /index.html --metas '{"Content-Type":"text/html","Content-Disposition":"inline"}'
+
