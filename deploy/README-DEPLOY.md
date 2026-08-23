@@ -94,23 +94,44 @@ atm_premium_monitor/
 
 需要 4 个 Secrets：`COS_SECRET_ID` / `COS_SECRET_KEY` / `COS_BUCKET` / `COS_REGION`。
 
-## 三、本机配置（恒指同步，一次性+每日自动）
+## 三、本机配置（恒指采集）
 
-1. **确认本机 git 能推送**（脚本靠 git 把 hsi.json 送上去，不再用 coscmd）：
-   ```bash
-   cd atm_premium_monitor
-   git push        # 能推成功即可；建议用 Git Credential Manager 记住凭据，避免计划任务卡在登录
+恒指是唯一必须在本机采集的品种（富途 OpenD 是唯一数据源）。
+
+1. **OpenD 登录**：打开图形版 `%APPDATA%\Futu_OpenD\Futu_OpenD.exe`，
+   勾选**记住密码**和**自动登录**，登录一次。之后作业脚本拉起它就能无人值守登录。
+
+   > 别用命令行版 `open-d\windows\FutuOpenD.exe`：它读 `FutuOpenD.xml` 里的
+   > `login_pwd_md5`，而图形版并不往那里写凭据（实测为空），
+   > 命令行版会因登录失败把监听端口关掉，表现为客户端 `WSAECONNREFUSED`。
+
+2. **确认 git 能推送**（脚本靠 git 送 hsi.json，不用 coscmd）：
    ```
-2. **手动测试同步**（确保 OpenD 在运行）：
-   ```bash
-   python deploy/local/sync_hsi.py --upload
+   git push
    ```
-   今日非交割日会打印"本月已记录/跳过"——属正常；交割日（每月最后第二营业日）会写入并推送。
-3. **Windows 计划任务**（每日 15:40 自动跑）：
-   ```bat
-   schtasks /create /tn "ATM-HSI-Sync" /tr "cmd /c cd /d E:\path\to\atm_premium_monitor && C:\path\to\python.exe deploy\local\sync_hsi.py --upload >> sync_hsi.log 2>&1" /sc daily /st 15:40
+   建议用 Git Credential Manager 记住凭据，避免计划任务卡在登录。
+
+3. **验证整条链路**：
    ```
-   （把路径换成实际 Python 与项目目录）
+   powershell -ExecutionPolicy Bypass -File deploy\localun_hsi_job.ps1 -TestOnly
+   ```
+   看到 `[selftest] OK` 和恒指报价才算通过——**端口通不等于登录成功**。
+
+4. **计划任务**（已注册，名为 `ATM-HSI-Sync`）：
+   每天 16:30 触发（港股 16:00 收盘 + 16:10 收市竞价结束，故不能沿用 A 股的 15:40），
+   开启了 **StartWhenAvailable**——关机错过了计划时间，下次开机后会尽快补跑。
+   重建命令见 `run_hsi_job.ps1` 顶部注释。
+
+### 采集与补采的能力边界
+
+| 时机 | 能拿到什么 |
+|---|---|
+| 交割日**当天**（OpenD 实时快照） | 完整明细：收盘点位、ATM 行权价、权利金、合约代码 |
+| 交割日**之后**（`sync_hsi.py` 自动补采） | best-effort，取决于历史K线权限；无权限时明确报错不静默 |
+| 事后从港交所费率表补（`import_hsi_csv.py`） | **只有费率**，没有点位/行权价/权利金 |
+
+所以完整明细只有交割日当天机器开着才拿得到。错过了用
+`python deploy\local\import_hsi_csv.py --upload` 至少把费率补上，明细列会是空的。
 
 ## 四、验证
 
@@ -131,7 +152,7 @@ atm_premium_monitor/
   （message 带 `[skip ci]`）。本地开发前先 `git pull`，否则容易与机器人提交冲突。
   机器人用 `GITHUB_TOKEN` 推送不会再次触发 workflow，不存在死循环。
 - **workflow 只有一份**：`.github/workflows/daily.yml`，不要再往 `deploy/actions/` 放副本
-- **本机关机影响**：仅恒指当日缺档，A股两个品种照常（Actions 在云端）
+- **本机关机影响**：错过交割日当天则恒指该月只能补回费率、丢失明细；A股两个品种不受影响（Actions 在云端）
 - **域名是唯一的长期依赖**：所有免费托管的默认域名都不可长期使用，买域名 + 备案是绕不开的一步
 
 ## 免责声明

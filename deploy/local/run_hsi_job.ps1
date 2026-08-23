@@ -43,6 +43,8 @@ function Invoke-WithTimeout($script, $extraArgs, $timeoutSec = 300) {
   $so = Join-Path $env:TEMP "hsi_job_out.txt"
   $se = Join-Path $env:TEMP "hsi_job_err.txt"
   Remove-Item $so, $se -ErrorAction SilentlyContinue
+  # python 重定向输出时按系统locale(GBK)编码，强制它出 UTF-8 好和读取端对齐
+  $env:PYTHONIOENCODING = "utf-8"
   $argList = @($script) + $extraArgs
   $pp = Start-Process -FilePath $Python -ArgumentList $argList -WorkingDirectory $ProjectDir `
                       -NoNewWindow -PassThru -RedirectStandardOutput $so -RedirectStandardError $se
