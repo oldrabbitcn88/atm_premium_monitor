@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# 日志
+*.log
+
+# 本机临时验证目录
+deploy/_verify/
+
+# 密钥防护（双保险）
+.env
+.env.local
+secrets.json
+cos_credentials.json

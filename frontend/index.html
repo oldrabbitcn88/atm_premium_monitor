@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ATM Premium Yield 月度监测面板</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #f5f4f1; color: #222; }
+  .header { background: #fff; border-bottom: 1px solid #e6e2da; padding: 14px 28px; display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+  .header h1 { font-size: 18px; font-weight: 600; color: #185fa5; }
+  .header .time { font-size: 12px; color: #888; }
+  .header button { margin-left: 10px; padding: 3px 12px; border: 1px solid #185fa5; background: #fff; color: #185fa5; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  .header button:hover { background: #185fa5; color: #fff; }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 20px 20px 60px; }
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 900px) { .cards { grid-template-columns: 1fr; } }
+  .card { background: #fff; border: 1px solid #e6e2da; border-radius: 14px; padding: 16px 20px; }
+  .card .name { font-size: 13px; color: #666; }
+  .card .name .tag { display: inline-block; font-size: 10.5px; padding: 0 7px; border-radius: 9px; background: #eef3fa; color: #4a6a8c; margin-left: 6px; }
+  .card .py { font-size: 32px; font-weight: 700; color: #185fa5; margin: 6px 0 2px; }
+  .card .py small { font-size: 13px; font-weight: 400; color: #888; }
+  .card .py .date { font-size: 12px; color: #999; font-weight: 400; margin-left: 8px; }
+  .card .stats { font-size: 12px; color: #555; line-height: 1.95; }
+  .card .stats b { font-weight: 600; color: #333; }
+  .card .badge { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 10px; background: #e6f1fb; color: #0c447c; margin-top: 8px; }
+  .section { margin-top: 26px; }
+  .section h2 { font-size: 15px; font-weight: 600; color: #333; margin-bottom: 10px; border-left: 4px solid #185fa5; padding-left: 10px; }
+  .section h2 small { font-size: 11.5px; color: #999; font-weight: 400; margin-left: 8px; }
+  .chart { width: 100%; height: 260px; background: #fff; border: 1px solid #e6e2da; border-radius: 12px; margin-bottom: 14px; }
+  .tableWrap { background: #fff; border: 1px solid #e6e2da; border-radius: 12px; margin-bottom: 14px; max-height: 380px; overflow: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { padding: 6px 10px; text-align: left; white-space: nowrap; border-bottom: 1px solid #f0ede6; }
+  th { position: sticky; top: 0; background: #f1efe8; font-weight: 600; color: #444; z-index: 2; }
+  tbody tr:hover { background: #f3f7fb; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .foot { font-size: 11.5px; color: #999; margin-top: 18px; line-height: 1.8; }
+  .statusBar { font-size: 12px; color: #666; padding: 8px 12px; background: #fff; border: 1px solid #e6e2da; border-radius: 8px; margin-bottom: 14px; }
+  .err { color: #a32d2d; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>ATM Premium Yield 月度监测面板</h1>
+  <div class="time">交割日口径（HSI=最后第二营业日 / IO=第三个周五 / ETF=第四个周三）｜数据截至：<span id="updTime">--</span>
+    <button onclick="manualRefresh()">执行交割日检查</button></div>
+</div>
+<div class="wrap">
+
+  <div class="statusBar" id="statusBar">加载中…</div>
+  <div class="cards" id="cards"></div>
+
+  <div class="section"><h2>三品种月度 Premium Yield 对比<small>最近36个月，鼠标移动查看各月数值</small></h2>
+    <div class="chart" id="chCompare"></div>
+  </div>
+
+  <div class="section"><h2>各品种月度 Premium Yield 历史走势<small>鼠标移动查看交割日/标的/ATM/权利金/合约明细</small></h2>
+    <div class="chart" id="chHSI"></div>
+    <div class="chart" id="ch300"></div>
+    <div class="chart" id="ch500"></div>
+  </div>
+
+  <div class="section"><h2>月度明细表<small>每品种每月1个数据点（交割日口径）</small></h2>
+    <div id="tables"></div>
+  </div>
+
+  <div class="foot">
+    口径说明：ATM Premium Yield = 每月交割日卖出下月平值看涨期权（ATM Call）收取的权利金 ÷ 当日标的收盘价（单月口径，参考港交所恒生指数备兑期权指数 HSICC 编制方法）。
+    行权价按各交易所合约规则动态取整（恒指20000点以上200点间距；中金所IO 50/100点；上交所ETF期权0.05~0.5元按现货区间）。<br>
+    本面板不做盘中高频采集——仅在每月交割日记录1个数据点；历史数据为此前Wind研究（IO/510500）与港交所口径月度费率（HSI）回溯导入。
+    所载数据仅供参考，不构成投资建议。
+  </div>
+</div>
+
+<script>
+var charts = {};
+var TARGET_KEYS = ['HSI', 'CSI300', 'CSI500'];
+var TARGET_META = {
+  HSI:    {name:'恒生指数',   unit:'点', color:'#a32d2d'},
+  CSI300: {name:'沪深300指数', unit:'点', color:'#185fa5'},
+  CSI500: {name:'中证500ETF',  unit:'元', color:'#1d9e75'}
+};
+var histData = {};   // key -> items(月度序列)
+var currentItems = [];
+
+function fmtPct(v) {
+  if (v == null) return '--';
+  return (v * 100).toFixed(3) + '%';
+}
+function esc(s) {
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* ---------- 卡片：最新月度数据 ---------- */
+function renderCards(items) {
+  var byKey = {};
+  items.forEach(function(it){ byKey[it.key] = it; });
+  var html = '';
+  TARGET_KEYS.forEach(function(k){
+    var it = byKey[k];
+    var meta = TARGET_META[k];
+    if (!it) {
+      html += '<div class="card"><div class="name">' + meta.name + '</div><div class="py err">--</div><div class="stats">暂无数据</div></div>';
+      return;
+    }
+    var py = it.premium_yield;
+    var extra = '';
+    if (it.stats && it.stats.first_ts) {
+      extra += '统计历史区间：<b>' + (it.stats.first_ts||'').slice(0,7) + ' ~ ' + (it.stats.last_ts||'').slice(0,7) + '</b>（' + it.stats.count + '期）<br>';
+    }
+    if (it.stats && it.stats.mean) {
+      var diff = py - it.stats.mean;
+      var flag = Math.abs(diff) < 0.002 ? '≈历史均值' : (diff > 0 ? '<span style="color:#a32d2d">高于历史均值</span>' : '<span style="color:#0f6e56">低于历史均值</span>');
+      extra += '历史均值：<b>' + (it.stats.mean*100).toFixed(2) + '%</b>（' + it.stats.count + '期，当前' + flag + '）<br>';
+    }
+    if (it.py_vol_ratio) {
+      extra += 'PY/Vol：<b>' + it.py_vol_ratio.toFixed(3) + '</b>（年化Vol ' + ((it.vol_annual||0)*100).toFixed(1) + '%）<br>';
+    }
+    var date = (it.ts || '').slice(0, 10);
+    html += '<div class="card">'
+      + '<div class="name">' + meta.name + '<span class="tag">最新月度</span></div>'
+      + '<div class="py">' + fmtPct(py) + '<small> / 月</small><span class="date">' + date + '</span></div>'
+      + '<div class="stats">'
+      + '标的收盘：<b>' + it.underlying + '</b> ' + meta.unit + '<br>'
+      + 'ATM行权价：<b>' + it.strike + '</b><br>'
+      + 'ATM Call权利金：<b>' + it.option_price + '</b> ' + meta.unit + '<br>'
+      + '到期：' + (it.expiry || '--') + ' ｜ 合约：' + esc(it.contract || '--') + '<br>'
+      + extra
+      + '</div>'
+      + (it.opt_status ? '<div class="badge" style="background:#fdf6ec;color:#854f0b">' + it.opt_status + '</div>' : '<div class="badge">每月交割日展期卖出下月ATM Call</div>')
+      + '</div>';
+  });
+  document.getElementById('cards').innerHTML = html;
+}
+
+/* ---------- 走势图 tooltip：完整明细 ---------- */
+function tipFormatter(params) {
+  var p = params[0];
+  if (!p || p.data == null) return '';
+  var d = p.data;
+  var meta = TARGET_META[d._key];
+  var rows = [
+    '<b>' + esc(meta.name) + '</b>｜' + (d._ym || ''),
+    'Premium Yield：<b>' + fmtPct(d.value) + '</b>',
+    '标的收盘：' + (d.underlying != null ? d.underlying : '--') + ' ' + meta.unit,
+    'ATM行权价：' + (d.strike != null ? d.strike : '--'),
+    '期权权利金：' + (d.option_price != null ? d.option_price : '--') + ' ' + meta.unit,
+    '合约：' + esc(d.contract || '--'),
+    '到期日：' + (d.expiry || '--')
+  ];
+  return rows.join('<br>');
+}
+
+function baseChartOpt(key) {
+  var meta = TARGET_META[key];
+  return {
+    title: { text: meta.name + ' 月度ATM Premium Yield', textStyle:{fontSize:12,color:'#666'}, left: 12, top: 8 },
+    tooltip: { trigger: 'axis', confine: true, formatter: tipFormatter },
+    grid: { left: 62, right: 24, top: 40, bottom: 30 },
+    xAxis: { type: 'category', data: [], axisLabel: { fontSize: 10, color: '#777' } },
+    yAxis: { type: 'value', axisLabel: { formatter: function(v){ return (v*100).toFixed(1)+'%'; }, fontSize: 10 } },
+    series: [{ type: 'line', showSymbol: false, smooth: true, data: [],
+      lineStyle:{width:1.8, color: meta.color}, itemStyle:{color: meta.color},
+      areaStyle:{color:'rgba(24,95,165,0.05)'} }]
+  };
+}
+
+function initCharts() {
+  charts.compare = echarts.init(document.getElementById('chCompare'));
+  charts.HSI = echarts.init(document.getElementById('chHSI'));
+  charts.CSI300 = echarts.init(document.getElementById('ch300'));
+  charts.CSI500 = echarts.init(document.getElementById('ch500'));
+  TARGET_KEYS.forEach(function(k){ charts[k].setOption(baseChartOpt(k)); });
+  charts.compare.setOption({
+    title: { text: '三品种月度Premium Yield对比', textStyle:{fontSize:12,color:'#666'}, left: 12, top: 8 },
+    tooltip: { trigger: 'axis', confine: true,
+      formatter: function(ps){
+        var s = '<b>' + (ps[0] && ps[0].axisValue || '') + '</b><br>';
+        ps.forEach(function(p){
+          s += '<span style="display:inline-block;width:10px;height:10px;background:' + p.color + ';border-radius:2px;margin-right:4px"></span>'
+             + p.seriesName + '：<b>' + (p.value == null ? '--' : (p.value*100).toFixed(3) + '%') + '</b><br>';
+        });
+        return s;
+      } },
+    legend: { data: TARGET_KEYS.map(function(k){ return TARGET_META[k].name; }), top: 4, textStyle:{fontSize:11} },
+    grid: { left: 62, right: 20, top: 36, bottom: 44 },
+    xAxis: { type: 'category', data: [], axisLabel: { fontSize: 10, color: '#777' } },
+    yAxis: { type: 'value', axisLabel: { formatter: function(v){ return (v*100).toFixed(1)+'%'; }, fontSize: 10 } },
+    series: TARGET_KEYS.map(function(k){
+      return { name: TARGET_META[k].name, type: 'bar', barMaxWidth: 14,
+        itemStyle: { color: TARGET_META[k].color }, data: [] };
+    })
+  });
+}
+
+/* ---------- 历史序列 ---------- */
+function loadHistory(key) {
+  return fetch('/api/history?key=' + key + '&limit=1200')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      histData[key] = d.items || [];
+      // 走势图：月度折线，data为对象（供tooltip取明细）
+      var pts = histData[key].map(function(x){
+        var o = { value: x.premium_yield, _key: key, _ym: (x.ts||'').slice(0,10), _m: (x.ts||'').slice(0,7),
+                  underlying: x.underlying, strike: x.strike, option_price: x.option_price,
+                  contract: x.contract, expiry: x.expiry };
+        if (x.premium_yield == null) o.value = null;
+        return o;
+      });
+      var ts = histData[key].map(function(x){ return (x.ts||'').slice(0,7); });
+      var mean = null;
+      var valid = pts.filter(function(p){ return p.value != null; }).map(function(p){ return p.value; });
+      if (valid.length) { mean = valid.reduce(function(a,b){ return a+b; },0)/valid.length; }
+      var opt = { xAxis: { data: ts }, series: [{ data: pts }] };
+      if (mean != null) {
+        opt.series[0].markLine = {
+          symbol: 'none',
+          data: [{ yAxis: mean, lineStyle: { color: '#d85a30', type: 'dashed', width: 1.2 },
+                   label: { formatter: '历史均值 ' + (mean*100).toFixed(2) + '%', color: '#d85a30', fontSize: 10 } }]
+        };
+      }
+      charts[key].setOption(opt);
+    }).catch(function(){});
+}
+
+/* ---------- 对比图：最近36个月 ---------- */
+function renderCompare() {
+  // 构建 ym -> {key: py}
+  var map = {};
+  TARGET_KEYS.forEach(function(k){
+    (histData[k]||[]).forEach(function(x){
+      var ym = (x.ts||'').slice(0,7);
+      if (!map[ym]) map[ym] = {};
+      if (x.premium_yield != null) map[ym][k] = x.premium_yield;
+    });
+  });
+  var yms = Object.keys(map).sort();
+  yms = yms.slice(-36);  // 最近36个月
+  var cats = yms;
+  var seriesData = TARGET_KEYS.map(function(k){
+    return yms.map(function(ym){ return map[ym][k] != null ? map[ym][k] : null; });
+  });
+  charts.compare.setOption({
+    xAxis: { data: cats },
+    series: seriesData.map(function(sd){ return { data: sd }; })
+  });
+}
+
+/* ---------- 明细表 ---------- */
+function renderTables() {
+  var html = '';
+  TARGET_KEYS.forEach(function(k){
+    var meta = TARGET_META[k];
+    var items = histData[k] || [];
+    var rows = '';
+    items.slice().reverse().forEach(function(x){
+      rows += '<tr>'
+        + '<td>' + (x.ts||'').slice(0,10) + '</td>'
+        + '<td class="num">' + fmtPct(x.premium_yield) + '</td>'
+        + '<td class="num">' + (x.underlying != null ? x.underlying : '--') + '</td>'
+        + '<td class="num">' + (x.strike != null ? x.strike : '--') + '</td>'
+        + '<td class="num">' + (x.option_price != null ? x.option_price : '--') + '</td>'
+        + '<td>' + esc(x.contract || '--') + '</td>'
+        + '</tr>';
+    });
+    html += '<h2 style="font-size:14px;color:#333;margin:14px 0 6px;border-left:4px solid ' + meta.color + ';padding-left:8px">'
+      + meta.name + '（' + items.length + '期）</h2>'
+      + '<div class="tableWrap"><table><thead><tr>'
+      + '<th>交割日/月份</th><th>Premium Yield</th><th>标的收盘</th><th>ATM行权价</th><th>权利金</th><th>合约</th>'
+      + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+  });
+  document.getElementById('tables').innerHTML = html;
+}
+
+/* ---------- 主流程 ---------- */
+function loadAll() {
+  fetch('/api/current').then(function(r){ return r.json(); }).then(function(d){
+    currentItems = d.items || [];
+    document.getElementById('updTime').textContent = d.server_time || '--';
+    renderCards(currentItems);
+  }).catch(function(){ document.getElementById('statusBar').textContent = '加载失败，请刷新重试'; });
+
+  Promise.all(TARGET_KEYS.map(loadHistory)).then(function(){
+    renderCompare();
+    renderTables();
+    var cnt = TARGET_KEYS.reduce(function(a,k){ return a + (histData[k]||[]).length; }, 0);
+    document.getElementById('statusBar').innerHTML = '数据为<b>月度交割日口径</b>：每品种每月1个数据点，共 <b>' + cnt + '</b> 期（HSI 2005年起 / 沪深300 2020年起 / 中证500 2022年起）。'
+      + '后台每日收盘后检查交割日自动落库，无需实时盯盘。';
+  }).catch(function(){});
+}
+
+function manualRefresh() {
+  document.getElementById('statusBar').textContent = '正在执行交割日检查…';
+  fetch('/api/refresh').then(function(r){ return r.json(); }).then(function(d){
+    if (!d.ok) { document.getElementById('statusBar').textContent = '检查失败: ' + (d.error||''); return; }
+    var parts = (d.report || []).map(function(r){
+      var nm = TARGET_META[r.key] ? TARGET_META[r.key].name : r.key;
+      return r.written ? nm + ' ✓ 已写入' : nm + '（' + (r.reason || '跳过') + '）';
+    });
+    document.getElementById('statusBar').innerHTML = '检查完成：' + parts.join('；') + '。';
+    loadAll();
+  }).catch(function(){
+    document.getElementById('statusBar').textContent = '检查失败（网络/OpenD异常）';
+  });
+}
+
+initCharts();
+loadAll();
+</script>
+</body>
+</html>
