@@ -2,9 +2,9 @@ name: daily-atm-premium
 
 on:
   schedule:
-    - cron: '40 7 * * 1-5'   # UTC 07:40 = 北京时间 15:40（交易日收盘后）
-  workflow_dispatch:          # 支持手动触发
-  push:                       # 前端/数据改动后自动重新发布（含本机推送的 hsi.json）
+    - cron: '40 7 * * 1-5'   # UTC 07:40 = 北京时间 15:40（A股收盘后）
+  workflow_dispatch:
+  push:
     branches: [main]
     paths:
       - 'deploy/frontend/**'
@@ -14,12 +14,6 @@ on:
 
 permissions:
   contents: write             # 回写 data.json
-  pages: write                # 发布 GitHub Pages
-  id-token: write             # deploy-pages 需要
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
   build:
@@ -35,7 +29,7 @@ jobs:
           python-version: '3.11'
 
       - name: 安装依赖
-        run: pip install requests
+        run: pip install requests coscmd
 
       - name: 运行计算（CSI300/CSI500）
         id: build
@@ -53,25 +47,40 @@ jobs:
           git pull --rebase --autostash origin "$GITHUB_REF_NAME"
           git push origin "HEAD:$GITHUB_REF_NAME"
 
-      - name: 组装站点（index.html 与两个 json 同目录）
+      # ---- 数据与静态资源上传 COS ----
+      # fetch() 与 <script src> 都不读 Content-Disposition，
+      # 所以 COS 的强制下载策略对这几个文件无影响，可放心走 COS 默认域名。
+      - name: 配置 coscmd
+        env:
+          COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
+          COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
+          COS_BUCKET: ${{ secrets.COS_BUCKET }}
+          COS_REGION: ${{ secrets.COS_REGION }}
+        run: coscmd config -a "$COS_SECRET_ID" -s "$COS_SECRET_KEY" -b "$COS_BUCKET" -r "$COS_REGION"
+
+      - name: 上传数据到 COS
+        run: |
+          coscmd upload deploy/data/data.json /data.json \
+            --metas '{"Content-Type":"application/json;charset=utf-8","Cache-Control":"no-cache"}'
+          coscmd upload deploy/data/hsi.json /hsi.json \
+            --metas '{"Content-Type":"application/json;charset=utf-8","Cache-Control":"no-cache"}'
+          coscmd upload deploy/frontend/vendor/echarts.min.js /echarts.min.js \
+            --metas '{"Content-Type":"application/javascript;charset=utf-8","Cache-Control":"max-age=604800"}'
+
+      # ---- 前端页面部署到 CloudBase 静态网站托管 ----
+      # COS 默认域名对 HTML 强制下载（2024后建的桶，平台策略，metas 覆盖不掉），
+      # 所以唯一需要被浏览器渲染的 index.html 放 CloudBase，默认域名免备案。
+      - name: 组装站点
         run: |
           mkdir -p _site
           cp deploy/frontend/index.html _site/index.html
-          cp deploy/data/data.json _site/data.json
-          cp deploy/data/hsi.json _site/hsi.json
-          touch _site/.nojekyll
           ls -l _site
 
-      - name: 上传 Pages 制品
-        uses: actions/upload-pages-artifact@v3
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: 发布到 GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: 部署到 CloudBase
+        env:
+          TENCENTCLOUD_SECRETID: ${{ secrets.COS_SECRET_ID }}
+          TENCENTCLOUD_SECRETKEY: ${{ secrets.COS_SECRET_KEY }}
+          CLOUDBASE_ENV_ID: ${{ secrets.CLOUDBASE_ENV_ID }}
+        run: |
+          npm install -g @cloudbase/cli
+          cloudbase hosting deploy _site / -e "$CLOUDBASE_ENV_ID"

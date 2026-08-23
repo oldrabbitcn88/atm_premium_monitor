@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ATM Premium Yield 月度监测面板</title>
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<!-- ECharts 自托管在 COS：jsDelivr 大陆不通；Content-Disposition 对 <script src> 无效，强制下载不影响加载 -->
+<script src="https://premium-yield-1341808236.cos.ap-shanghai.myqcloud.com/echarts.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #f5f4f1; color: #222; }
@@ -68,7 +69,7 @@
   <div class="foot">
     口径说明：ATM Premium Yield = 每月交割日卖出下月平值看涨期权（ATM Call）收取的权利金 ÷ 当日标的收盘价（单月口径，参考港交所恒生指数备兑期权指数 HSICC 编制方法）。
     行权价按各交易所合约规则动态取整（恒指20000点以上200点间距；中金所IO 50/100点；上交所ETF期权0.05~0.5元按现货区间）。<br>
-    本面板为纯静态：数据文件 data.json（沪深300/中证500，GitHub Actions每日15:40生成）与 hsi.json（恒生指数，本机OpenD每日同步）同目录存放，无后端服务器。
+    本面板为纯静态：数据文件 data.json（沪深300/中证500，GitHub Actions每日15:40生成）与 hsi.json（恒生指数，本机OpenD每日同步）存放于腾讯云 COS，本页托管于云开发静态网站，无后端服务器。
     所载数据仅供参考，不构成投资建议。
   </div>
 </div>
@@ -280,7 +281,9 @@ function loadAll() {
   document.getElementById('statusBar').textContent = '加载中…';
   histData = {};
   currentItems = [];
-  var files = ['data.json', 'hsi.json'];
+  // 数据文件放 COS（大陆直连、不限速、CORS 已开）；本页自身托管在 CloudBase
+  var COS_BASE = 'https://premium-yield-1341808236.cos.ap-shanghai.myqcloud.com/';
+  var files = [COS_BASE + 'data.json', COS_BASE + 'hsi.json'];
   var reqs = files.map(function(fn){
     return fetch(fn).then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; });
   });
@@ -298,7 +301,7 @@ function loadAll() {
     var g = results.map(function(r){ return r && r.generated_at; }).filter(Boolean).join(' ／ ');
     document.getElementById('updTime').textContent = g || '--';
   }).catch(function(){
-    document.getElementById('statusBar').textContent = '加载失败：请确认 data.json / hsi.json 与本页面同目录。';
+    document.getElementById('statusBar').textContent = '加载失败：无法从 COS 读取 data.json / hsi.json，请检查网络或桶权限。';
   });
 }
 
