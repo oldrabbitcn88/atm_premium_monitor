@@ -11,6 +11,7 @@
 """
 import datetime
 import json
+import socket
 import os
 import subprocess
 import sys
@@ -25,6 +26,15 @@ from backend.engine import premium_yield            # noqa: E402
 HSI_JSON = os.path.join(BASE, "..", "data", "hsi.json")
 FUTU_HOST = os.environ.get("FUTU_HOST", "127.0.0.1")
 FUTU_PORT = int(os.environ.get("FUTU_PORT", "11111"))
+
+
+def opend_reachable(host, port, timeout=3):
+    """OpenD 未启动时富途 SDK 会无限重连，先探一下端口，探不通就快速失败"""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 def is_hsi_expiry_today(futu, today):
@@ -48,6 +58,11 @@ def main():
     if any((h.get("ts") or "")[:7] == ym for h in hist):
         print("[sync_hsi] 本月已记录，跳过")
         return
+
+    if not opend_reachable(FUTU_HOST, FUTU_PORT):
+        print(f"[sync_hsi] OpenD 未运行（{FUTU_HOST}:{FUTU_PORT} 连不上），本次跳过。"
+              "请先启动富途 OpenD 并登录后重试。")
+        sys.exit(1)
 
     futu = FutuAdapter(host=FUTU_HOST, port=FUTU_PORT)
     try:
