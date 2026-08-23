@@ -51,7 +51,7 @@ function Invoke-WithTimeout($script, $extraArgs, $timeoutSec = 300) {
     Stop-Process -Id $pp.Id -Force -ErrorAction SilentlyContinue
   }
   foreach ($f in @($so, $se)) {
-    Get-Content $f -ErrorAction SilentlyContinue |
+    Get-Content $f -Encoding UTF8 -ErrorAction SilentlyContinue |
       Where-Object { $_ -notmatch "_connect_sync|network_manager|on_connect" } |
       ForEach-Object { Write-Log "  $_" }
   }
@@ -66,8 +66,10 @@ function Test-Port($port) {
 
 Write-Log "===== 作业开始 (TestOnly=$TestOnly) ====="
 
-$exe = Join-Path $OpenDDir "open-d\windows\FutuOpenD.exe"
-$cfg = Join-Path $OpenDDir "FutuOpenD.xml"
+# 用图形版 Futu_OpenD.exe：它靠"记住密码 + 自动登录"完成无人值守登录。
+# 命令行版 open-d\windows\FutuOpenD.exe 走的是 FutuOpenD.xml 里的 login_pwd_md5，
+# 而图形版并不往那里写凭据（实测该字段为空），命令行版会因登录失败关掉监听端口。
+$exe = Join-Path $OpenDDir "Futu_OpenD.exe"
 $startedByUs = $false
 $proc = $null
 
@@ -75,10 +77,8 @@ if (Test-Port $ApiPort) {
   Write-Log "端口 $ApiPort 已通，复用现有 OpenD（结束时不会关闭它）"
 } else {
   if (-not (Test-Path $exe)) { Write-Log "找不到 OpenD: $exe"; exit 1 }
-  if (-not (Test-Path $cfg)) { Write-Log "找不到配置: $cfg"; exit 1 }
   Write-Log "拉起 OpenD: $exe"
-  $proc = Start-Process -FilePath $exe -ArgumentList "-cfg_file=`"$cfg`"" `
-                        -WorkingDirectory (Split-Path $exe) -WindowStyle Hidden -PassThru
+  $proc = Start-Process -FilePath $exe -WorkingDirectory $OpenDDir -PassThru
   $startedByUs = $true
 
   $ready = $false
@@ -92,8 +92,8 @@ if (Test-Port $ApiPort) {
     if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
     exit 1
   }
-  # 端口通了不代表登录完成，多给几秒
-  Start-Sleep -Seconds 8
+  # 端口通了不代表登录完成（自动登录要走网络），多留一点时间
+  Start-Sleep -Seconds 20
 }
 
 try {
