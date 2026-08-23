@@ -5,6 +5,9 @@ on:
     - cron: '40 7 * * 1-5'   # UTC 07:40 = 北京时间 15:40（交易日收盘后）
   workflow_dispatch:          # 支持手动触发
 
+permissions:
+  contents: write             # 需要把更新后的 data.json 提交回仓库
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -22,9 +25,20 @@ jobs:
         run: pip install requests coscmd
 
       - name: 运行计算（CSI300/CSI500）
+        id: build
         env:
           TZ: Asia/Shanghai
         run: python deploy/actions/build_data.py
+
+      - name: 回写 data.json 到仓库（保证新数据点跨次运行不丢失）
+        if: steps.build.outputs.data_changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deploy/data/data.json
+          git commit -m "chore(data): 自动更新 data.json [skip ci]"
+          git pull --rebase --autostash origin "$GITHUB_REF_NAME"
+          git push origin "HEAD:$GITHUB_REF_NAME"
 
       - name: 配置 coscmd
         env:
@@ -37,6 +51,7 @@ jobs:
 
       - name: 上传 COS
         run: |
-          coscmd upload deploy/data/data.json /data.json
-          coscmd upload deploy/frontend/index.html /index.html --metas '{"Content-Type":"text/html","Content-Disposition":"inline"}'
-
+          coscmd upload deploy/data/data.json /data.json \
+            --metas '{"Content-Type":"application/json;charset=utf-8","Content-Disposition":"inline","Cache-Control":"no-cache"}'
+          coscmd upload deploy/frontend/index.html /index.html \
+            --metas '{"Content-Type":"text/html;charset=utf-8","Content-Disposition":"inline","Cache-Control":"no-cache"}'

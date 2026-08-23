@@ -209,6 +209,7 @@ def main():
     with open(DATA_FILE, encoding="utf-8") as f:
         payload = json.load(f)
     items = payload["items"]
+    before = json.dumps(items, sort_keys=True, ensure_ascii=False)
     report = []
 
     # ---- CSI300：IO ----
@@ -253,7 +254,15 @@ def main():
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False)
     print("\n".join(report))
-    print("[build_data] 完成，data.json 已更新")
+
+    # 是否真的新增/改动了数据点（generated_at 变化不算）
+    changed = json.dumps(items, sort_keys=True, ensure_ascii=False) != before
+    gh_out = os.environ.get("GITHUB_OUTPUT")
+    if gh_out:
+        with open(gh_out, "a", encoding="utf-8") as f:
+            f.write("data_changed=" + ("true" if changed else "false") + chr(10))
+
+    print(f"[build_data] 完成，data.json 已更新（数据点变化: {changed}）")
 
 
 if __name__ == "__main__":

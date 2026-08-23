@@ -82,8 +82,10 @@ def main():
         futu.close()
 
     if upload:
+        metas = ('{"Content-Type":"application/json;charset=utf-8",'
+                 '"Content-Disposition":"inline","Cache-Control":"no-cache"}')
         for cmd in [
-            ["coscmd", "upload", os.path.normpath(HSI_JSON), "/hsi.json"],
+            ["coscmd", "upload", os.path.normpath(HSI_JSON), "/hsi.json", "--metas", metas],
         ]:
             print("[sync_hsi] 上传COS:", " ".join(cmd))
             subprocess.run(cmd, check=False)

@@ -26,8 +26,7 @@ atm_premium_monitor/
 │   │   ├── data.json          # CSI300 + CSI500 历史+最新（Actions维护）
 │   │   └── hsi.json           # HSI 历史+最新（本机同步维护）
 │   ├── actions/
-│   │   ├── build_data.py      # A股计算脚本（Actions运行，仅需requests）
-│   │   └── daily.yml          # GitHub Actions workflow（放 .github/workflows/）
+│   │   └── build_data.py      # A股计算脚本（Actions运行，仅需requests）
 │   ├── local/
 │   │   └── sync_hsi.py        # 本机恒指同步（OpenD + Windows计划任务）
 │   ├── frontend/
@@ -52,11 +51,7 @@ atm_premium_monitor/
 ## 二、GitHub 仓库配置（一次性，约10分钟）
 
 1. **创建公开仓库**（如 `atm-premium-monitor`），上传本项目（含 `deploy/`）
-2. **把 workflow 放到正确位置**：
-   ```bash
-   mkdir -p .github/workflows
-   cp deploy/actions/daily.yml .github/workflows/daily.yml
-   ```
+2. **workflow 位置**：唯一一份在 `.github/workflows/daily.yml`（改这一份即可，不要再放副本）
 3. **配置 Secrets**：仓库 → Settings → Secrets and variables → Actions → New repository secret，添加4个：
    - `COS_SECRET_ID` = 你的SecretId
    - `COS_SECRET_KEY` = 你的SecretKey
@@ -96,6 +91,12 @@ atm_premium_monitor/
 ## 五、日常维护
 
 - **改前端/计算逻辑**：改 `deploy/frontend/index.html` 或 `build_data.py` → push 到 GitHub → Actions 自动上传（前端改动需手动触发一次 Run workflow 或等下次定时）
+- **COS 上传必须带 `--metas`**：HTML 不带 `Content-Type: text/html` + `Content-Disposition: inline`，
+  COS 默认返回 `attachment`，浏览器会强制下载而不是渲染。workflow 与 `sync_hsi.py` 均已带上，
+  新增上传命令时别漏。另外**必须用静态网站域名** `*.cos-website.<region>.myqcloud.com` 访问，
+  COS 原始域名 `*.cos.<region>.myqcloud.com` 永远触发下载。
+- **data.json 会被 Actions 回写进仓库**：交割日采集到新数据点后，workflow 会自动 commit 回 main
+  （commit message 带 `[skip ci]`）。本地开发前先 `git pull`，否则容易与机器人提交冲突。
 - **COS 密钥泄露风险**：SecretKey 只存 GitHub Secrets 与本机 coscmd 配置，勿提交到代码
 - **本机关机影响**：仅恒指当日缺档，A股两个品种照常（Actions 在云端）
 
