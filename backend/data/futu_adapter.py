@@ -112,6 +112,36 @@ class FutuAdapter:
         print(f"[Futu] 恒指期权行情失败: {snap}")
         return None, None
 
+    @classmethod
+    def monthly_expiry_of(cls, year, month):
+        """某月的恒指月度交割日（最后第二个营业日，理论算法）
+        富途的到期日列表只给未来合约，补采过去的月份查不到，故用规则推算。
+        """
+        return cls._month_end_business_day(datetime.date(year, month, 1), n=2)
+
+    def get_close_on(self, code, day, lookback=7):
+        """取 code 在 day 当日的日K收盘价。
+        该日休市则回退到之前最近的交易日（lookback 天内）。
+        :return: (实际日期字符串, 收盘价) 或 (None, None)
+        """
+        start = (day - datetime.timedelta(days=lookback)).isoformat()
+        try:
+            ret, data, _ = self.quote.request_history_kline(
+                code, start=start, end=day.isoformat(),
+                ktype=ft.KLType.K_DAY, autype=None, max_count=None,
+            )
+        except Exception as e:
+            print(f"[Futu] {code} 历史K线异常: {e}")
+            return None, None
+        if ret != ft.RET_OK:
+            print(f"[Futu] {code} 历史K线失败: {data}")
+            return None, None
+        if len(data) == 0:
+            print(f"[Futu] {code} 在 {start}~{day} 无K线数据")
+            return None, None
+        row = data.iloc[-1]
+        return str(row["time_key"])[:10], float(row["close"])
+
     def close(self):
         try:
             self.quote.close()
