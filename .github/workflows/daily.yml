@@ -64,23 +64,9 @@ jobs:
             --metas '{"Content-Type":"application/json;charset=utf-8","Cache-Control":"no-cache"}'
           coscmd upload deploy/data/hsi.json /hsi.json \
             --metas '{"Content-Type":"application/json;charset=utf-8","Cache-Control":"no-cache"}'
-          coscmd upload deploy/frontend/vendor/echarts.min.js /echarts.min.js \
-            --metas '{"Content-Type":"application/javascript;charset=utf-8","Cache-Control":"max-age=604800"}'
 
-      # ---- 前端页面部署到 CloudBase 静态网站托管 ----
-      # COS 默认域名对 HTML 强制下载（2024后建的桶，平台策略，metas 覆盖不掉），
-      # 所以唯一需要被浏览器渲染的 index.html 放 CloudBase，默认域名免备案。
-      - name: 组装站点
-        run: |
-          mkdir -p _site
-          cp deploy/frontend/index.html _site/index.html
-          ls -l _site
-
-      - name: 部署到 CloudBase
-        env:
-          TENCENTCLOUD_SECRETID: ${{ secrets.COS_SECRET_ID }}
-          TENCENTCLOUD_SECRETKEY: ${{ secrets.COS_SECRET_KEY }}
-          CLOUDBASE_ENV_ID: ${{ secrets.CLOUDBASE_ENV_ID }}
-        run: |
-          npm install -g @cloudbase/cli
-          cloudbase hosting deploy _site / -e "$CLOUDBASE_ENV_ID"
+      # 前端页面不在这里部署：静态托管产品（EdgeOne Pages）直接对接本仓库，
+      # 检测到 push 后自行拉取 deploy/frontend/ 构建发布。
+      # COS 默认域名对 HTML 强制下载（2024 后建的桶，平台策略，metas 覆盖不掉），
+      # 所以 index.html 不能走 COS；但 data.json/hsi.json 走 COS 完全没问题，
+      # 因为 fetch() 不读 Content-Disposition。
