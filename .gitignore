@@ -27,3 +27,6 @@ cos_credentials.json
 
 # 本机作业日志
 deploy/local/hsi_job.log
+
+# 构建产物
+_site/
