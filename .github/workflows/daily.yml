@@ -61,9 +61,9 @@ jobs:
       - name: 上传数据到 COS
         run: |
           coscmd upload deploy/data/data.json /data.json \
-            --metas '{"Content-Type":"application/json;charset=utf-8","Cache-Control":"no-cache"}'
+            -H '{"Content-Type":"application/json;charset=utf-8","Cache-Control":"no-cache"}'
           coscmd upload deploy/data/hsi.json /hsi.json \
-            --metas '{"Content-Type":"application/json;charset=utf-8","Cache-Control":"no-cache"}'
+            -H '{"Content-Type":"application/json;charset=utf-8","Cache-Control":"no-cache"}'
 
       # 前端页面不在这里部署：静态托管产品（EdgeOne Pages）直接对接本仓库，
       # 检测到 push 后自行拉取 deploy/frontend/ 构建发布。

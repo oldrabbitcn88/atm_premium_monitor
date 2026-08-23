@@ -21,7 +21,10 @@ GitHub Actions（免费）              本机 OpenD（每日16:30计划任务�
 **COS 不能托管 HTML。** 2024-01-01 后创建的存储桶，走默认域名（**含静态网站域名
 `*.cos-website.*`**）访问任意类型文件都会被强制下载，响应带平台注入的
 `x-cos-force-download: true`，优先级高于对象自身的 `Content-Disposition: inline`，
-`coscmd --metas` 怎么设都无效。这是产品边界（COS 是对象存储，不是 web 托管），不是配置问题。
+`coscmd -H` 怎么设都无效。这是产品边界（COS 是对象存储，不是 web 托管），不是配置问题。
+
+> 附带一个坑：`coscmd upload` **没有 `--metas` 参数**，设响应头要用 `-H`（`--headers`），
+> 传 `--metas` 会因非法参数直接失败。早期 workflow 就栽在这里，而且失败得很安静。
 
 **但 COS 完全可以放数据。** `fetch()` 和 `<script src>` 都**不读** `Content-Disposition`，
 强制下载策略对它们无效。所以 `data.json` / `hsi.json` 走 COS 默认域名毫无问题，
