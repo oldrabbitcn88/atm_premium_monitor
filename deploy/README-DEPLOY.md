@@ -1,31 +1,44 @@
-# ATM Premium Yield 静态化部署（GitHub Actions + GitHub Pages）
+# ATM Premium Yield 静态化部署（GitHub Actions 算数 + COS 存数据 + 静态托管跑页面）
 
-零服务器架构：**GitHub Actions 每日定时计算 → 站点文件发布到 GitHub Pages → 浏览器直接读取渲染**。
-成本 ¥0（Actions 与 Pages 对公开仓库免费），富途 OpenD 留在本机（仅每日 1 次抓恒指）。
+三层拆分：**GitHub Actions 算数 → 数据落 COS → 页面由静态托管产品渲染**。
 
 ```
-GitHub Actions（免费）                本机 OpenD（每日15:40计划任务）
-  └─ 拉中金所IO/上交所510500    ┌──────┘ 抓恒指点位+恒指期权
-  └─ 算 ATM PY → data.json      └──→ hsi.json ──git push──┐
-        │                                                  │
-        └──────────────► 仓库 main 分支 ◄──────────────────┘
-                              │
-                              ▼
-                   GitHub Pages（同一个 workflow 发布）
-                   ├── index.html  （前端，读以下两个 json）
-                   ├── data.json   （沪深300/中证500）
-                   └── hsi.json    （恒生指数）
-                              ▲
-              用户浏览器访问 https://<用户名>.github.io/<仓库名>/
+GitHub Actions（免费）              本机 OpenD（每日16:30计划任务）
+  └─ 拉中金所IO/上交所510500   ┌──────┘ 抓恒指点位+恒指期权
+  └─ 算 ATM PY → data.json     └──→ hsi.json ──git push──┐
+        │                                                 │
+        ├──── coscmd 上传 ────► 腾讯云 COS               │
+        │                       ├── data.json            │
+        │                       └── hsi.json ◄───────────┘
+        │                              ▲ fetch()
+        └──────► 仓库 main ──► 静态托管产品（EdgeOne Pages 等）
+                                ├── index.html   ← 唯一需要被浏览器渲染的文件
+                                └── vendor/echarts.min.js
 ```
 
-> **为什么不用腾讯云 COS**：2024-01-01 之后创建的 COS 存储桶，通过默认域名
-> （**包括静态网站域名 `*.cos-website.*`**）访问任意类型文件都会被强制下载，
-> 响应带平台注入的 `x-cos-force-download: true`，其优先级高于对象自身的
-> `Content-Disposition: inline`，`coscmd --metas` 无论怎么设都救不回来。
-> 唯一解法是绑定自定义域名，而大陆地域的自定义域名还要求 ICP 备案。
-> 排查方法：`curl -sSD - <url> -o /dev/null`，看到 `x-cos-force-download: true`
-> 就别再折腾元数据了。（注意 HEAD 请求不返回 `Content-Disposition`，必须用 GET。）
+## 为什么是这个拆法（重要，别再走回头路）
+
+**COS 不能托管 HTML。** 2024-01-01 后创建的存储桶，走默认域名（**含静态网站域名
+`*.cos-website.*`**）访问任意类型文件都会被强制下载，响应带平台注入的
+`x-cos-force-download: true`，优先级高于对象自身的 `Content-Disposition: inline`，
+`coscmd --metas` 怎么设都无效。这是产品边界（COS 是对象存储，不是 web 托管），不是配置问题。
+
+**但 COS 完全可以放数据。** `fetch()` 和 `<script src>` 都**不读** `Content-Disposition`，
+强制下载策略对它们无效。所以 `data.json` / `hsi.json` 走 COS 默认域名毫无问题，
+额外好处是数据更新不需要重新构建站点。
+
+**排查手法**：`curl -sS -o /dev/null -D - <url>`。
+注意**必须用 GET**——COS 的 HEAD 响应不返回 `Content-Disposition`，
+用 `curl -I` 自检会得到"一切正常"的假象。
+
+## 大陆网络约束
+
+- `github.io`、`cdn.jsdelivr.net` 裸网均不可用，故 GitHub Pages 托管 + jsDelivr CDN 这条路不成立；
+  echarts 已自托管在 `deploy/frontend/vendor/`
+- 开发机若挂了代理，**在本机做的"大陆能否访问"测试一律不可信**
+  （代理 TUN 模式会把 DNS 解析到 `198.18.0.0/15` fake-IP 段），必须用手机流量验
+- 各静态托管产品的默认域名都不能长期用：CloudBase 免费额度仅一个环境；
+  EdgeOne Pages 默认域名只有 3 小时限时预览。**长期可用必须绑自己的域名**
 
 ## 目录结构
 
@@ -47,17 +60,24 @@ atm_premium_monitor/
 │   └── README-DEPLOY.md       # 本文档
 ```
 
-## 一、开启 GitHub Pages（一次性，约 1 分钟）
+## 一、静态托管（页面）
 
-1. 确认仓库是 **Public**（免费版 Pages 只支持公开仓库）
-2. 仓库 → **Settings → Pages → Build and deployment → Source** 选 **GitHub Actions**
-   （不要选 "Deploy from a branch"）
-3. 站点地址：`https://<用户名>.github.io/<仓库名>/`，首次发布后在 Actions 运行日志的
-   deploy 步骤里也能直接看到
+页面托管产品直接对接本仓库，检测到 push 后自行构建发布。以 EdgeOne Pages 为例，
+项目配置：
 
-无需任何 Secrets——Pages 用内置的 `GITHUB_TOKEN`，workflow 里已声明所需 `permissions`。
+| 项 | 值 |
+|---|---|
+| 生产分支 | `main` |
+| 框架预设 | Other |
+| 根目录 | `./` |
+| **输出目录** | **`deploy/frontend`** |
+| 构建命令 / 安装命令 | 留空（纯静态，无构建步骤） |
 
-## 二、workflow 做了什么
+**域名**：默认域名只有 3 小时限时预览，长期可用必须绑自定义域名。
+大陆节点加速要求域名已 ICP 备案；未备案域名可选"不含中国大陆"的加速区域，
+走海外节点，大陆能访问但较慢。
+
+## 二、GitHub Actions（算数 + 传 COS）
 
 `.github/workflows/daily.yml` 触发时机：每个工作日北京时间 15:40（cron UTC 07:40）、
 手动 Run workflow、以及 `deploy/**` 有 push 时。每次运行依次：
@@ -67,7 +87,9 @@ atm_premium_monitor/
 2. **若数据点真的有变化**（`generated_at` 变化不算），把 `deploy/data/data.json`
    commit + push 回 main —— 这一步是关键：Actions 每次都是全新 checkout，
    不回写的话新数据点只存在于当次产物里，顺延窗口一过就会被基线覆盖丢失
-3. 把 `index.html` + `data.json` + `hsi.json` 复制到 `_site/` 并发布到 Pages
+3. 用 coscmd 把 `data.json`、`hsi.json` 传到 COS
+
+需要 4 个 Secrets：`COS_SECRET_ID` / `COS_SECRET_KEY` / `COS_BUCKET` / `COS_REGION`。
 
 ## 三、本机配置（恒指同步，一次性+每日自动）
 
@@ -92,22 +114,22 @@ atm_premium_monitor/
 | 验证项 | 方法 | 预期 |
 |---|---|---|
 | Actions 计算 | Actions 页 Run workflow | 日志显示"非交割日"或"已更新"，末尾打印"数据点变化: True/False" |
-| Pages 发布 | 同一次运行的 deploy 作业 | 输出站点 URL，状态 success |
+| COS 数据 | `curl -sS -o /dev/null -D - <桶域名>/hsi.json` | HTTP 200，`Content-Type: application/json` |
+| 页面发布 | 托管产品构建日志 | 构建成功，输出站点 URL |
 | 前端渲染 | 浏览器打开站点 URL | 三卡片+三图+明细表正常，hover 显示明细（**不再弹下载**） |
 | 本机同步 | `python deploy/local/sync_hsi.py` | OpenD 在线时连接成功；交割日写入 |
 | 数据更新 | 交割日后次日打开页面 | 最新月度日期变为当月交割日 |
 
 ## 五、日常维护
 
-- **改前端/计算逻辑**：改 `deploy/frontend/index.html` 或 `build_data.py` → push 到 main
-  → workflow 自动重新发布 Pages（`deploy/**` 路径已在 push 触发范围内）
+- **改前端**：改 `deploy/frontend/index.html` → push 到 main → 托管产品自动重新构建发布
+- **改计算逻辑**：改 `build_data.py` → push 到 main → workflow 自动跑并传 COS
 - **data.json 会被 Actions 回写进仓库**：交割日采集到新数据点后 workflow 会自动 commit 回 main
   （message 带 `[skip ci]`）。本地开发前先 `git pull`，否则容易与机器人提交冲突。
   机器人用 `GITHUB_TOKEN` 推送不会再次触发 workflow，不存在死循环。
 - **workflow 只有一份**：`.github/workflows/daily.yml`，不要再往 `deploy/actions/` 放副本
 - **本机关机影响**：仅恒指当日缺档，A股两个品种照常（Actions 在云端）
-- **大陆访问 github.io 时快时慢**：如果以后需要稳定直连，路径是买域名 + ICP 备案 + 绑定
-  COS/CDN 自定义域名；届时把 COS 上传步骤从 git 历史里捡回来即可（commit 73e577d）
+- **域名是唯一的长期依赖**：所有免费托管的默认域名都不可长期使用，买域名 + 备案是绕不开的一步
 
 ## 免责声明
 
