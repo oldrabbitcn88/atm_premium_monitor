@@ -3,11 +3,11 @@
 本机恒指同步脚本：本地 OpenD 抓恒指点位 + 恒指期权 ATM PY
 - 读 deploy/data/hsi.json（含历史）
 - 若今日为恒指期权月度交割日（每月最后第二个营业日，以富途到期日列表为准）且当月未更新，更新当月点
-- 写回 hsi.json（供前端读取；由 Windows 计划任务每日 15:40 调用，随后上传 COS）
+- 写回 hsi.json（供前端读取；由 Windows 计划任务每日 15:40 调用，随后推送到 GitHub 触发 Pages 重新发布）
 
 用法：
   python sync_hsi.py                 # 仅更新 hsi.json
-  python sync_hsi.py --upload        # 更新后调用 coscmd 上传（需已配置 coscmd）
+  python sync_hsi.py --upload        # 更新后 git commit + push 到 GitHub（触发 Pages 重新发布）
 """
 import datetime
 import json
@@ -82,13 +82,20 @@ def main():
         futu.close()
 
     if upload:
-        metas = ('{"Content-Type":"application/json;charset=utf-8",'
-                 '"Content-Disposition":"inline","Cache-Control":"no-cache"}')
+        rel = os.path.relpath(os.path.normpath(HSI_JSON), ROOT)
         for cmd in [
-            ["coscmd", "upload", os.path.normpath(HSI_JSON), "/hsi.json", "--metas", metas],
+            ["git", "add", rel],
+            ["git", "commit", "-m", f"chore(data): 恒指 {today} 交割日数据"],
+            ["git", "pull", "--rebase", "--autostash", "origin", "main"],
+            ["git", "push", "origin", "main"],
         ]:
-            print("[sync_hsi] 上传COS:", " ".join(cmd))
-            subprocess.run(cmd, check=False)
+            print("[sync_hsi] ", " ".join(cmd))
+            r = subprocess.run(cmd, cwd=ROOT)
+            if r.returncode != 0:
+                print(f"[sync_hsi] 失败(退出码{r.returncode})，已中止推送；hsi.json 已写入本地，可稍后手动 git push")
+                break
+        else:
+            print("[sync_hsi] 已推送到 GitHub，Pages 将自动重新发布")
 
 
 if __name__ == "__main__":
