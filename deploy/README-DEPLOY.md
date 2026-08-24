@@ -63,6 +63,14 @@ atm_premium_monitor/
 │   └── README-DEPLOY.md       # 本文档
 ```
 
+## 站点地址
+
+**https://atm-premium-yield-d2dab164c1808d-1341815007.tcloudbaseapp.com/**
+
+> 默认域名 = `<envId>-<APPID>.tcloudbaseapp.com`，**带 APPID 后缀**，
+> 不是纯 envId。用错域名会返回 `HTTP 418`（易被误判成"托管没开通"）。
+> 腾讯云提示默认域名有访问频率限制、仅供开发测试；长期正式使用建议绑自定义域名。
+
 ## 一、静态托管（页面）
 
 页面托管产品直接对接本仓库，检测到 push 后自行构建发布。以 EdgeOne Pages 为例，
@@ -113,7 +121,8 @@ atm_premium_monitor/
 
 3. **验证整条链路**：
    ```
-   powershell -ExecutionPolicy Bypass -File deploy\localun_hsi_job.ps1 -TestOnly
+   powershell -ExecutionPolicy Bypass -File deploy\local
+un_hsi_job.ps1 -TestOnly
    ```
    看到 `[selftest] OK` 和恒指报价才算通过——**端口通不等于登录成功**。
 
