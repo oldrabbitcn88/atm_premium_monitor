@@ -100,7 +100,16 @@ atm_premium_monitor/
    不回写的话新数据点只存在于当次产物里，顺延窗口一过就会被基线覆盖丢失
 3. 用 coscmd 把 `data.json`、`hsi.json` 传到 COS
 
+4. 组装站点：把 `deploy/frontend/` 拷进 `_site/`，并按 `COS_BUCKET`/`COS_REGION`
+   覆盖前端里的 `COS_BASE` —— **换 COS 桶只需改 secrets，不用改代码**
+5. 用 CloudBase CLI 把 `_site/` 部署到静态托管
+
 需要 4 个 Secrets：`COS_SECRET_ID` / `COS_SECRET_KEY` / `COS_BUCKET` / `COS_REGION`。
+COS 与 CloudBase 在同一个腾讯云账号下，共用同一对密钥。
+
+> **换账号/换桶时别忘了**：COS 桶必须配 CORS（`AllowedOrigin: *`，`GET`/`HEAD`），
+> 否则页面（在 tcloudbaseapp.com 上）跨域 fetch COS 数据会被浏览器拦掉。
+> 数据本身不用手工迁移——`data.json`/`hsi.json` 都在仓库里，workflow 会自动传到新桶。
 
 ## 三、本机配置（恒指采集）
 
