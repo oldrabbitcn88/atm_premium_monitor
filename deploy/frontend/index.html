@@ -69,7 +69,7 @@
   <div class="foot">
     口径说明：ATM Premium Yield = 每月交割日卖出下月平值看涨期权（ATM Call）收取的权利金 ÷ 当日标的收盘价（单月口径，参考港交所恒生指数备兑期权指数 HSICC 编制方法）。
     行权价按各交易所合约规则动态取整（恒指20000点以上200点间距；中金所IO 50/100点；上交所ETF期权0.05~0.5元按现货区间）。<br>
-    本面板为纯静态：数据文件 data.json（沪深300/中证500，GitHub Actions每日15:40生成）与 hsi.json（恒生指数，本机OpenD每日同步）存放于腾讯云 COS，本页托管于云开发静态网站，无后端服务器。
+    本面板为纯静态：数据文件 data.json（沪深300/中证500，GitHub Actions 每交易日 15:40 生成）与 hsi.json（恒生指数，本机 OpenD 每交易日 16:30 同步）存放于腾讯云 COS，本页托管于云开发静态网站，无后端服务器。
     所载数据仅供参考，不构成投资建议。
   </div>
 </div>
@@ -297,7 +297,7 @@ function loadAll() {
     var total = TARGET_KEYS.reduce(function(a,k){ return a + (histData[k]||[]).length; }, 0);
     document.getElementById('statusBar').innerHTML = '数据为<b>月度交割日口径</b>：每品种每月1个数据点，共 <b>' + total + '</b> 期'
       + '（HSI 2005年起 / 沪深300 2020年起 / 中证500 2022年起）。'
-      + '沪深300/中证500由 GitHub Actions 每日15:40生成；恒生指数由本机 OpenD 每日同步。';
+      + '沪深300/中证500由 GitHub Actions 每交易日 15:40 生成；恒生指数由本机 OpenD 每交易日 16:30 同步（港股 16:00 收盘）。';
     var g = results.map(function(r){ return r && r.generated_at; }).filter(Boolean).join(' ／ ');
     document.getElementById('updTime').textContent = g || '--';
   }).catch(function(){
