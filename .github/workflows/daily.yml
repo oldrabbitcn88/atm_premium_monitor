@@ -65,8 +65,16 @@ jobs:
           coscmd upload deploy/data/hsi.json /hsi.json \
             -H '{"Content-Type":"application/json;charset=utf-8","Cache-Control":"no-cache"}'
 
-      # 前端页面不在这里部署：静态托管产品（EdgeOne Pages）直接对接本仓库，
-      # 检测到 push 后自行拉取 deploy/frontend/ 构建发布。
-      # COS 默认域名对 HTML 强制下载（2024 后建的桶，平台策略，metas 覆盖不掉），
-      # 所以 index.html 不能走 COS；但 data.json/hsi.json 走 COS 完全没问题，
-      # 因为 fetch() 不读 Content-Disposition。
+      # ---- 前端页面部署到 CloudBase 静态网站托管 ----
+      # COS 默认域名对 HTML 强制下载（2024 后建的桶，平台策略，元数据覆盖不掉），
+      # 所以唯一需要被浏览器渲染的 index.html 走 CloudBase，默认域名免备案。
+      # 数据仍留在 COS：fetch() 不读 Content-Disposition，且改数据无需重新部署页面。
+      - name: 部署页面到 CloudBase
+        env:
+          TCB_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
+          TCB_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
+          TCB_ENV_ID: atm-premium-yield-d2dab164c1808d
+        run: |
+          npm install -g @cloudbase/cli
+          cloudbase login --apiKeyId "$TCB_SECRET_ID" --apiKey "$TCB_SECRET_KEY"
+          cloudbase hosting deploy deploy/frontend / -e "$TCB_ENV_ID" --verify
