@@ -93,4 +93,34 @@ jobs:
         run: |
           npm install -g @cloudbase/cli
           cloudbase login --apiKeyId "$TC_SECRET_ID" --apiKey "$TC_SECRET_KEY"
-          cloudbase hosting deploy _site / -e "$TCB_ENV_ID" --verify
+          # 不加 --verify：它上传后立刻查远端，常因可见性延迟误报
+          # "一致性校验失败: missing=..."，而文件其实已经传上去了。
+          # 改用下一步的真实 HTTP 请求验证——检的是用户实际拿到的东西。
+          cloudbase hosting deploy _site / -e "$TCB_ENV_ID"
+
+      - name: 验证站点（真实 HTTP 请求）
+        env:
+          SITE: https://atm-premium-yield-d2dab164c1808d-1341815007.tcloudbaseapp.com
+          COS_BUCKET: ${{ secrets.COS_BUCKET }}
+          COS_REGION: ${{ secrets.COS_REGION }}
+        run: |
+          ok=0
+          for i in $(seq 1 10); do
+            code=$(curl -sS -o /tmp/idx.html -w '%{http_code}' --max-time 30 "$SITE/?ci=$GITHUB_RUN_ID" || echo 000)
+            if [ "$code" = "200" ] && grep -q "ATM Premium Yield" /tmp/idx.html; then
+              ok=1; echo "第 $i 次：页面 OK（$(wc -c < /tmp/idx.html) 字节）"; break
+            fi
+            echo "第 $i 次：HTTP $code，10 秒后重试"
+            sleep 10
+          done
+          if [ "$ok" != "1" ]; then echo "::error::站点验证失败，页面取不到或内容不对"; exit 1; fi
+
+          js=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 90 "$SITE/vendor/echarts.min.js" || echo 000)
+          echo "echarts -> HTTP $js"
+          if [ "$js" != "200" ]; then echo "::error::echarts 不可访问"; exit 1; fi
+
+          for f in data.json hsi.json; do
+            c=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30                 "https://${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com/$f" || echo 000)
+            echo "COS $f -> HTTP $c"
+            if [ "$c" != "200" ]; then echo "::error::COS 上的 $f 取不到"; exit 1; fi
+          done

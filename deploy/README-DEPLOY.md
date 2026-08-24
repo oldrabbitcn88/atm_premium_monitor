@@ -103,6 +103,12 @@ atm_premium_monitor/
 4. 组装站点：把 `deploy/frontend/` 拷进 `_site/`，并按 `COS_BUCKET`/`COS_REGION`
    覆盖前端里的 `COS_BASE` —— **换 COS 桶只需改 secrets，不用改代码**
 5. 用 CloudBase CLI 把 `_site/` 部署到静态托管
+6. 用真实 HTTP 请求验证站点、echarts、COS 数据都可访问
+
+> **不要给 `cloudbase hosting deploy` 加 `--verify`**：它上传后立刻查远端，
+> 常因可见性延迟误报 `一致性校验失败: missing=/index.html,...`，而文件其实已经传上去了。
+> 这种假失败会让 workflow 常态飘红，真出问题时反而不被当回事。第 6 步的
+> HTTP 验证检的是用户实际拿到的东西，更可靠。
 
 需要 4 个 Secrets：`COS_SECRET_ID` / `COS_SECRET_KEY` / `COS_BUCKET` / `COS_REGION`。
 COS 与 CloudBase 在同一个腾讯云账号下，共用同一对密钥。
@@ -157,7 +163,7 @@ un_hsi_job.ps1 -TestOnly
 |---|---|---|
 | Actions 计算 | Actions 页 Run workflow | 日志显示"非交割日"或"已更新"，末尾打印"数据点变化: True/False" |
 | COS 数据 | `curl -sS -o /dev/null -D - <桶域名>/hsi.json` | HTTP 200，`Content-Type: application/json` |
-| 页面发布 | 托管产品构建日志 | 构建成功，输出站点 URL |
+| 页面发布 | workflow 的"验证站点"步 | 页面 200、echarts 200、COS 两个 json 200 |
 | 前端渲染 | 浏览器打开站点 URL | 三卡片+三图+明细表正常，hover 显示明细（**不再弹下载**） |
 | 本机同步 | `python deploy/local/sync_hsi.py` | OpenD 在线时连接成功；交割日写入 |
 | 数据更新 | 交割日后次日打开页面 | 最新月度日期变为当月交割日 |
