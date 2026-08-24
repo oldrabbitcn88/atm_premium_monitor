@@ -282,7 +282,7 @@ function loadAll() {
   histData = {};
   currentItems = [];
   // 数据文件放 COS（大陆直连、不限速、CORS 已开）；本页自身托管在 CloudBase
-  var COS_BASE = 'https://premium-yield-1341808236.cos.ap-shanghai.myqcloud.com/';
+  var COS_BASE = 'https://atm-premium-yield-1341815007.cos.ap-shanghai.myqcloud.com/';
   var files = [COS_BASE + 'data.json', COS_BASE + 'hsi.json'];
   var reqs = files.map(function(fn){
     return fetch(fn).then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; });
