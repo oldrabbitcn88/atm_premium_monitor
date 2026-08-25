@@ -85,6 +85,16 @@ var TARGET_META = {
 var histData = {};       // key -> history[]
 var currentItems = [];   // 最新月度卡片数据
 
+// 权利金显示：带 ≈ 的是由 PY×标的 反算出来的，不是市场成交价
+function fmtPremium(x) {
+  if (!x || x.option_price == null) return '--';
+  if (x.option_price_derived) {
+    return '<span style="color:#999" title="由 Premium Yield × 标的收盘 反算，非市场成交价">≈'
+           + x.option_price + '</span>';
+  }
+  return x.option_price;
+}
+
 function fmtPct(v) { return v == null ? '--' : (v * 100).toFixed(3) + '%'; }
 function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function statOf(hist) {
@@ -127,7 +137,7 @@ function renderCards() {
       + '<div class="stats">'
       + '标的收盘：<b>' + (it.underlying != null ? it.underlying : '--') + '</b> ' + meta.unit + '<br>'
       + 'ATM行权价：<b>' + (it.strike != null ? it.strike : '--') + '</b><br>'
-      + 'ATM Call权利金：<b>' + (it.option_price != null ? it.option_price : '--') + '</b> ' + meta.unit + '<br>'
+      + 'ATM Call权利金：<b>' + fmtPremium(it) + '</b> ' + meta.unit + '<br>'
       + '到期：' + (it.expiry || '--') + ' ｜ 合约：' + esc(it.contract || '--') + '<br>'
       + extra
       + '</div>'
@@ -146,7 +156,7 @@ function tipFormatter(params) {
     + '<br>Premium Yield：<b>' + fmtPct(d.value) + '</b>'
     + '<br>标的收盘：' + (d.underlying != null ? d.underlying : '--') + ' ' + meta.unit
     + '<br>ATM行权价：' + (d.strike != null ? d.strike : '--')
-    + '<br>期权权利金：' + (d.option_price != null ? d.option_price : '--') + ' ' + meta.unit
+    + '<br>期权权利金：' + fmtPremium(d) + ' ' + meta.unit
     + '<br>合约：' + esc(d.contract || '--')
     + '<br>到期日：' + (d.expiry || '--');
 }
@@ -238,13 +248,13 @@ function renderTables() {
         + '<td class="num">' + fmtPct(x.premium_yield) + '</td>'
         + '<td class="num">' + (x.underlying != null ? x.underlying : '--') + '</td>'
         + '<td class="num">' + (x.strike != null ? x.strike : '--') + '</td>'
-        + '<td class="num">' + (x.option_price != null ? x.option_price : '--') + '</td>'
+        + '<td class="num">' + fmtPremium(x) + '</td>'
         + '<td>' + esc(x.contract || '--') + '</td></tr>';
     });
     html += '<h2 style="font-size:14px;color:#333;margin:14px 0 6px;border-left:4px solid ' + meta.color + ';padding-left:8px">'
       + meta.name + '（' + items.length + '期）</h2>'
       + '<div class="tableWrap"><table><thead><tr>'
-      + '<th>交割日</th><th>Premium Yield</th><th>标的收盘</th><th>ATM行权价</th><th>权利金</th><th>合约</th>'
+      + '<th>交割日</th><th>Premium Yield</th><th>标的收盘</th><th>ATM行权价</th><th>权利金<small style="font-weight:normal;color:#999">（≈为反算）</small></th><th>合约</th>'
       + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
   });
   document.getElementById('tables').innerHTML = html;
@@ -283,6 +293,7 @@ function loadAll() {
   currentItems = [];
   // 数据文件放 COS（大陆直连、不限速、CORS 已开）；本页自身托管在 CloudBase
   var COS_BASE = 'https://atm-premium-yield-1341815007.cos.ap-shanghai.myqcloud.com/';
+
   var files = [COS_BASE + 'data.json', COS_BASE + 'hsi.json'];
   var reqs = files.map(function(fn){
     return fetch(fn).then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; });
