@@ -86,13 +86,23 @@ def main():
     with open(HSI_JSON, encoding="utf-8") as f:
         payload = json.load(f)
     hist = payload["items"]["HSI"]["history"]
-    have = {(h.get("ts") or "")[:7] for h in hist}
+    by_ym = {(h.get("ts") or "")[:7]: h for h in hist}
 
-    added = []
+    added, upgraded = [], []
     for year, month, py in rows:
         ym = f"{year:04d}-{month:02d}"
-        if ym in have:
-            continue          # 已有则不覆盖，保护实时采集到的明细
+        rec = by_ym.get(ym)
+        if rec is not None:
+            # 已有记录：只有当它是 sync_hsi 写的临时值时才升级为港交所权威值。
+            # 明细（标的/行权价/合约）保留 OpenD 抓到的，那部分港交所 CSV 没有。
+            if rec.get("premium_yield_provisional"):
+                rec["premium_yield"] = round(py, 6)
+                rec.pop("premium_yield_provisional", None)
+                if rec.get("underlying"):
+                    rec["option_price"] = round(py * rec["underlying"], 1)
+                    rec["option_price_derived"] = True
+                upgraded.append(ym)
+            continue
         exp = month_end_business_day(year, month)
         ny, nm = (year + 1, 1) if month == 12 else (year, month + 1)
         hist.append({
@@ -104,22 +114,22 @@ def main():
         })
         added.append(ym)
 
-    if not added:
-        print(f"[import_csv] 无缺口，hsi.json 已有 {len(hist)} 期，无需补")
+    if not added and not upgraded:
+        print(f"[import_csv] 无缺口也无待升级项，hsi.json 已有 {len(hist)} 期")
         return
 
     hist.sort(key=lambda h: h.get("ts") or "")
     payload["generated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(HSI_JSON, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False)
-    print(f"[import_csv] 已补 {len(added)} 期: {', '.join(added)}（共 {len(hist)} 期）")
+    print(f"[import_csv] 新增 {len(added)} 期" + (f": {', '.join(added)}" if added else "") + f"；升级 {len(upgraded)} 期临时值为港交所口径" + (f": {', '.join(upgraded)}" if upgraded else "") + f"（共 {len(hist)} 期）")
     print("[import_csv] 注意：补进来的月份没有点位/行权价/权利金明细，前端明细表这几列会显示空")
 
     if args.upload:
         rel = os.path.relpath(os.path.normpath(HSI_JSON), ROOT)
         for cmd in [
             ["git", "add", rel],
-            ["git", "commit", "-m", f"chore(data): 从港交所费率表补恒指 {', '.join(added)}"],
+            ["git", "commit", "-m", f"chore(data): 港交所费率表同步 新增{len(added)}期/升级{len(upgraded)}期"],
             ["git", "pull", "--rebase", "--autostash", "origin", "main"],
             ["git", "push", "origin", "main"],
         ]:

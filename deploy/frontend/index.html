@@ -70,6 +70,7 @@
     口径说明：ATM Premium Yield = 每月交割日卖出下月平值看涨期权（ATM Call）收取的权利金 ÷ 当日标的收盘价（单月口径，参考港交所恒生指数备兑期权指数 HSICC 编制方法）。
     行权价按各交易所合约规则动态取整（恒指20000点以上200点间距；中金所IO 50/100点；上交所ETF期权0.05~0.5元按现货区间）。<br>
     本面板为纯静态：数据文件 data.json（沪深300/中证500，GitHub Actions 每交易日 15:40 生成）与 hsi.json（恒生指数，本机 OpenD 每交易日 16:30 同步）存放于腾讯云 COS，本页托管于云开发静态网站，无后端服务器。
+    恒指 Premium Yield 以港交所费率表为权威口径（259 期同一把尺子）；权利金列带 ≈ 者为 PY×标的 反算，标「临」的 PY 为 OpenD 临时值、待港交所发布后覆盖。<br>
     所载数据仅供参考，不构成投资建议。
   </div>
 </div>
@@ -88,11 +89,24 @@ var currentItems = [];   // 最新月度卡片数据
 // 权利金显示：带 ≈ 的是由 PY×标的 反算出来的，不是市场成交价
 function fmtPremium(x) {
   if (!x || x.option_price == null) return '--';
-  if (x.option_price_derived) {
-    return '<span style="color:#999" title="由 Premium Yield × 标的收盘 反算，非市场成交价">≈'
-           + x.option_price + '</span>';
+  if (!x.option_price_derived) return x.option_price;
+  var tip = '由 Premium Yield × 标的收盘 反算，非市场成交价';
+  if (x.option_price_market != null) {
+    tip += '；同期 OpenD 实测 last 价为 ' + x.option_price_market
+         + '（市场快照口径，系统性高于港交所口径）';
   }
-  return x.option_price;
+  return '<span style="color:#999" title="' + tip + '">≈' + x.option_price + '</span>';
+}
+
+// 港交所尚未发布当月费率时，PY 是 OpenD 临时值，标出来避免被当成定稿
+function fmtPy(x) {
+  if (!x || x.premium_yield == null) return '--';
+  var t = fmtPct(x.premium_yield);
+  if (x.premium_yield_provisional) {
+    return t + '<sup style="color:#c47f17" title="临时值：取自 OpenD 市场快照，'
+             + '待港交所费率表发布后覆盖为权威口径">临</sup>';
+  }
+  return t;
 }
 
 function fmtPct(v) { return v == null ? '--' : (v * 100).toFixed(3) + '%'; }
@@ -133,7 +147,7 @@ function renderCards() {
     }
     html += '<div class="card">'
       + '<div class="name">' + meta.name + '<span class="tag">最新月度</span></div>'
-      + '<div class="py">' + fmtPct(it.premium_yield) + '<small> / 月</small><span class="date">' + (it.ts||'') + '</span></div>'
+      + '<div class="py">' + fmtPy(it) + '<small> / 月</small><span class="date">' + (it.ts||'') + '</span></div>'
       + '<div class="stats">'
       + '标的收盘：<b>' + (it.underlying != null ? it.underlying : '--') + '</b> ' + meta.unit + '<br>'
       + 'ATM行权价：<b>' + (it.strike != null ? it.strike : '--') + '</b><br>'
@@ -204,6 +218,7 @@ function loadHistory(key) {
   var pts = hist.map(function(x){
     var o = { value: x.premium_yield, _key: key, _ym: (x.ts||'').slice(0,10),
               underlying: x.underlying, strike: x.strike, option_price: x.option_price,
+              option_price_derived: x.option_price_derived, option_price_market: x.option_price_market,
               contract: x.contract, expiry: x.expiry };
     return o;
   });
@@ -245,7 +260,7 @@ function renderTables() {
     var rows = '';
     items.slice().reverse().forEach(function(x){
       rows += '<tr><td>' + (x.ts||'').slice(0,10) + '</td>'
-        + '<td class="num">' + fmtPct(x.premium_yield) + '</td>'
+        + '<td class="num">' + fmtPy(x) + '</td>'
         + '<td class="num">' + (x.underlying != null ? x.underlying : '--') + '</td>'
         + '<td class="num">' + (x.strike != null ? x.strike : '--') + '</td>'
         + '<td class="num">' + fmtPremium(x) + '</td>'
@@ -282,7 +297,10 @@ function buildCurrentItems() {
     var py = last.premium_yield;
     var py_vol = (py != null && vol) ? py / vol : null;
     return { key:k, ts:last.ts, underlying:last.underlying, strike:last.strike,
-             option_price:last.option_price, premium_yield:py, expiry:last.expiry,
+             option_price:last.option_price, option_price_derived:last.option_price_derived,
+             option_price_market:last.option_price_market,
+             premium_yield:py, premium_yield_provisional:last.premium_yield_provisional,
+             expiry:last.expiry,
              contract:last.contract, stats:st, vol_annual:vol, py_vol_ratio:py_vol };
   }).filter(Boolean);
 }

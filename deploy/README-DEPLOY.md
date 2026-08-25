@@ -146,6 +146,30 @@ un_hsi_job.ps1 -TestOnly
    开启了 **StartWhenAvailable**——关机错过了计划时间，下次开机后会尽快补跑。
    重建命令见 `run_hsi_job.ps1` 顶部注释。
 
+### 恒指 PY 的口径（重要）
+
+**主序列一律以港交所费率表为准。** 259 期历史里 257 期来自港交所 CSV，
+而历史期权价拿不到、无法重算，所以只能让新数据向历史看齐，不能反过来。
+
+实测发现 OpenD 的 `last_price` 系统性高出港交所口径约 20%
+（2026-06 为 1.23x，2026-07 为 1.19x，方向与幅度一致；港交所用的应是卖方
+可成交价而非最后成交价）。若直接用 OpenD 写 `premium_yield`，序列会出现
+结构性断层，"当前 vs 历史均值"的对比就失真了——图上会显示成权利金突然变贵，
+但那是换了尺子。
+
+数据字段约定：
+
+| 字段 | 含义 |
+|---|---|
+| `premium_yield` | 权威 PY（港交所口径） |
+| `premium_yield_provisional` | true = 港交所尚未发布，当前是 OpenD 临时值 |
+| `option_price` | 与 `premium_yield` 一致的权利金 |
+| `option_price_derived` | true = 由 PY×标的 反算，非市场成交价 |
+| `option_price_market` | OpenD 抓到的市场 last 价（仅存档，不参与计算） |
+
+流程：交割日当天 `sync_hsi.py` 抓到明细，PY 记为**临时值**；等港交所发布当月
+费率后跑 `import_hsi_csv.py --upload`，临时值被覆盖为权威值，明细保留。
+
 ### 采集与补采的能力边界
 
 | 时机 | 能拿到什么 |

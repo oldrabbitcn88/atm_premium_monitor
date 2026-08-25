@@ -118,10 +118,17 @@ def main():
 
         day, hsi_price, strike, opt_price, expiry = got
         py = premium_yield(opt_price, hsi_price)
+        # 口径：主序列一律以港交所费率表为准（259 期历史都是这个口径）。
+        # OpenD 的 last 价系统性高出港交所约 20%（港交所用的应是卖方可成交价），
+        # 直接拿它写 premium_yield 会让序列出现结构性断层、历史均值对比失真。
+        # 故此处只记为临时值，等港交所发布当月费率后由 import_hsi_csv.py 覆盖。
         new = {
             "ts": day.strftime("%Y-%m-%d"),
-            "underlying": hsi_price, "strike": strike, "option_price": opt_price,
+            "underlying": hsi_price, "strike": strike,
+            "option_price": opt_price,
+            "option_price_market": opt_price,
             "premium_yield": round(py, 6),
+            "premium_yield_provisional": True,
             "expiry": f"{expiry.year:04d}-{expiry.month:02d}",
             "contract": f"HK.HSI{expiry.strftime('%y%m%d')}C{int(strike) * 1000}",
         }
@@ -135,8 +142,8 @@ def main():
         payload["generated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with open(HSI_JSON, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False)
-        print(f"[sync_hsi] 已写入: {day} 收盘{hsi_price} ATM{strike} "
-              f"权利金{opt_price} PY={py:.4%}")
+        print(f"[sync_hsi] 已写入(临时口径): {day} 收盘{hsi_price} ATM{strike} "
+              f"权利金{opt_price} PY={py:.4%} —— 待港交所费率发布后覆盖")
     finally:
         futu.close()
 
