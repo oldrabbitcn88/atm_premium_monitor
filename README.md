@@ -91,6 +91,36 @@ python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 - 监测"下一个月度到期日"合约（距今天≥10天），即 HSICC 展期卖出的下月 ATM call
 - ETF 期权若因标的分红被除息调整（合约简称带 A/B），自动取行权价≥现货且最接近的 call
 
+## 附：Global X 3419 备兑覆盖比率（独立模块）
+
+监测 Global X 恒指备兑 ETF（3419.HK）**每日备兑期权相对正股多头敞口的覆盖比率**。
+与上面的月度 ATM 权利金监测相互独立，但口径可以相乘使用：
+`组合层面权利金收入率 ≈ 覆盖比率 × ATM Premium Yield`。
+
+```
+backend/coverage.py                 覆盖比率引擎（分类/乘数/三种口径/BS delta）
+backend/data/globalx_adapter.py     官网持仓抓取与解析（csv/xlsx/json/html 自适应）
+backend/tools/gx_coverage.py        CLI：fetch / local / report / wayback / monthly-urls
+.github/workflows/gx3419.yml        每日两次自动抓取并回写仓库
+docs/3419-covered-call-coverage.md  数据来源、口径定义、坑与统计方法（先读这份）
+tests/test_coverage.py              25 个单元测试（python -m unittest discover -s tests）
+```
+
+```bash
+pip install requests openpyxl
+
+python -m backend.tools.gx_coverage --code 3419 --hsi auto fetch        # 抓当日 → 存档 → 重算
+python -m backend.tools.gx_coverage --hsi 26013.5 local ./holdings.csv  # 手工下载的文件入档
+python -m backend.tools.gx_coverage report                              # 不联网，仅重算
+python -m backend.tools.gx_coverage monthly-urls --start 2024-03 --check  # 官方备兑月报
+```
+
+数据落在 `deploy/data/gx3419/`：`raw/<as_of>.json`（每日快照）、`coverage.json`、`coverage.csv`。
+
+> **重要**：官网只挂当日持仓、原地覆盖，没有历史存档，所以"下载过去所有逐日持仓"公开渠道做不到。
+> 逐日序列只能从开始跑这个脚本的那天起自建；历史靠官方月报（月度）+ 中期/年度报告（半年度）+
+> Internet Archive（零散）回填。详见 `docs/3419-covered-call-coverage.md`。
+
 ## 免责声明
 
 本工具所载数据与计算仅供参考，不构成投资建议。市场有风险，投资需谨慎。

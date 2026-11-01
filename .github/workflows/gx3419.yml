@@ -1,0 +1,63 @@
+name: gx3419-coverage
+
+# 每日抓 Global X 3419（恒指备兑）全量持仓并回写仓库。
+# 这是拿到"逐日"序列的唯一办法：官网只挂当日一份持仓，覆盖即丢，没有历史存档。
+# 按 as_of 去重，所以一天跑多次、补跑都不会重复落点。
+
+on:
+  schedule:
+    - cron: '30 1 * * 2-6'    # UTC 01:30 = 港时 09:30（取前一交易日那份）
+    - cron: '30 10 * * 1-5'   # UTC 10:30 = 港时 18:30（当日收盘后若已更新则补当日）
+  workflow_dispatch:
+    inputs:
+      hsi:
+        description: '手工指定恒指点位（留空则自动取）'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: pip install requests openpyxl
+
+      - name: 抓持仓 + 算覆盖比率
+        id: run
+        env:
+          TZ: Asia/Hong_Kong
+        run: |
+          set -o pipefail
+          HSI="${{ github.event.inputs.hsi }}"
+          [ -z "$HSI" ] && HSI=auto
+          # 官网若改版/反爬导致抓取失败，不让整条 workflow 红——
+          # 失败明细进日志，数据缺口由下一次或人工 local 补。
+          python -m backend.tools.gx_coverage --hsi "$HSI" fetch 2>&1 | tee /tmp/gx.log || {
+            echo "::warning::3419 持仓抓取失败，见日志；可手工下载后用 local 子命令补档"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
+      - name: 回写仓库
+        if: steps.run.outputs.ok == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deploy/data/gx3419
+          if git diff --cached --quiet; then
+            echo "无新增数据，跳过提交"
+            exit 0
+          fi
+          git commit -m "chore(data): 3419 持仓快照与覆盖比率 [skip ci]"
+          git pull --rebase --autostash origin "$GITHUB_REF_NAME"
+          git push origin "HEAD:$GITHUB_REF_NAME"
