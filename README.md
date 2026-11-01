@@ -117,9 +117,22 @@ python -m backend.tools.gx_coverage monthly-urls --start 2024-03 --check  # 官�
 
 数据落在 `deploy/data/gx3419/`：`raw/<as_of>.json`（每日快照）、`coverage.json`、`coverage.csv`。
 
-> **重要**：官网只挂当日持仓、原地覆盖，没有历史存档，所以"下载过去所有逐日持仓"公开渠道做不到。
-> 逐日序列只能从开始跑这个脚本的那天起自建；历史靠官方月报（月度）+ 中期/年度报告（半年度）+
-> Internet Archive（零散）回填。详见 `docs/3419-covered-call-coverage.md`。
+```bash
+# ★ 历史回填先试这个：持仓文件名自带日期（3419_full_holdings_20261029.csv），
+#   把日期换掉往往能直接下到历史文件。地址从 chrome://downloads 右键复制。
+python -m backend.tools.gx_coverage backfill-csv \
+  --from-url 'https://www.globalxetfs.com.hk/<持仓CSV完整地址>' --since 20240229
+```
+
+两个口径同时输出：
+
+- `official_coverage_pct_nav`：官网「期權持倉」表自带的**名義敞口佔資產淨值比例**（分母是 NAV）
+- `coverage_spot/strike/delta`：**相对正股多头敞口**（分母 = 正股 + 指数ETF + 期货名义）
+
+> **重要**：页面上只挂当日持仓，但旧文件可能仍留在服务器原路径——先用 `backfill-csv`
+> 枚举一轮再下结论。若命中率为 0，再退回官方月报（月度）+ 中期/年度报告（半年度）+
+> Internet Archive（零散）。另注意「每日持股」CSV 多半**只含股票**，期权腿在页面单独
+> 一张表里，`fetch` 会自动合并。详见 `docs/3419-covered-call-coverage.md`。
 
 ## 免责声明
 

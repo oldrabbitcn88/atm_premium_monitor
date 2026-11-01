@@ -43,6 +43,7 @@ DEFAULT_DATA_DIR = os.path.join(REPO, "deploy", "data", "gx3419")
 
 CSV_COLUMNS = [
     "as_of", "fund", "coverage_spot", "coverage_strike", "coverage_delta_est",
+    "official_coverage_pct_nav", "nav_implied",
     "long_index_equiv", "equity_mv", "index_etf_mv", "futures_notional",
     "short_call_contracts", "short_call_spot_notional", "short_call_strike_notional",
     "short_call_mv", "index_level", "index_level_source",
@@ -123,13 +124,15 @@ def _fmt_pct(x):
 def _print_table(series):
     if not series:
         return
-    print("\n%-12s %10s %10s %10s %14s %8s %8s" % (
-        "日期", "现货口径", "行权价口径", "delta口径", "多头名义(亿)", "空头张数", "加权剩余天"))
+    print("\n%-12s %10s %10s %10s %10s %12s %8s %7s" % (
+        "日期", "官方/NAV", "现货口径", "行权价口径", "delta口径",
+        "多头名义(亿)", "空头张数", "剩余天"))
     for r in series:
         le = r.get("long_index_equiv")
-        print("%-12s %10s %10s %10s %14s %8s %8s" % (
-            r.get("as_of") or "?", _fmt_pct(r.get("coverage_spot")),
-            _fmt_pct(r.get("coverage_strike")), _fmt_pct(r.get("coverage_delta_est")),
+        print("%-12s %10s %10s %10s %10s %12s %8s %7s" % (
+            r.get("as_of") or "?", _fmt_pct(r.get("official_coverage_pct_nav")),
+            _fmt_pct(r.get("coverage_spot")), _fmt_pct(r.get("coverage_strike")),
+            _fmt_pct(r.get("coverage_delta_est")),
             ("%.2f" % (le / 1e8)) if le else "n/a",
             r.get("short_call_contracts") if r.get("short_call_contracts") is not None else "n/a",
             r.get("wavg_dte") if r.get("wavg_dte") is not None else "n/a"))
@@ -202,6 +205,83 @@ def wayback_backfill(code, data_dir, since="20240228", until=None, limit=400,
             ingested += 1 if written else 0
     print("\nWayback 回填完成：新增 %d 个日期" % ingested)
     return ingested
+
+
+# ---------- 按日期枚举回填历史持仓 ----------
+
+def backfill_by_url(code, data_dir, url_template=None, from_url=None,
+                    since="20240229", until=None, sleep_sec=0.4, overwrite=False,
+                    skip_weekends=True):
+    """持仓文件名自带日期（3419_full_holdings_20261029.csv），
+    所以历史往往可以直接按日期枚举下载——这是拿到真·逐日序列最省事的路。
+
+    :param from_url: 任意一个已知的持仓下载地址（chrome://downloads 里复制），
+                     自动推导出日期模板
+    :param url_template: 直接给模板，{date}=YYYYMMDD、{date_dash}=YYYY-MM-DD、{code}=代码
+    """
+    if not url_template:
+        if from_url:
+            url_template, d = gx.derive_url_template(from_url)
+            if not url_template:
+                raise SystemExit("给的地址里没找到 YYYYMMDD 日期，无法推导模板：%s" % from_url)
+            print("由 %s 推导出模板：\n  %s" % (d, url_template))
+        else:
+            print("未给地址，尝试从基金页自动发现持仓文件地址……")
+            ad = gx.GlobalXAdapter()
+            _page, _html, cands = ad.discover_holdings_urls(code)
+            for u in cands:
+                tpl, d = gx.derive_url_template(u)
+                if tpl:
+                    url_template, from_url = tpl, u
+                    print("发现：%s\n模板：%s" % (u, tpl))
+                    break
+            if not url_template:
+                raise SystemExit(
+                    "没能自动发现带日期的持仓地址。\n"
+                    "请在浏览器点一次「每日持股 (.CSV)」，到 chrome://downloads 复制该\n"
+                    "文件的来源地址，然后：--from-url '<那个地址>'")
+
+    ad = gx.GlobalXAdapter()
+    start = datetime.datetime.strptime(since, "%Y%m%d").date()
+    end = (datetime.datetime.strptime(until, "%Y%m%d").date() if until
+           else datetime.date.today())
+    existing = set()
+    if os.path.isdir(raw_dir(data_dir)):
+        existing = {fn[:-5] for fn in os.listdir(raw_dir(data_dir)) if fn.endswith(".json")}
+
+    import time
+    day = start
+    hit = miss = skipped = 0
+    while day <= end:
+        if skip_weekends and day.weekday() >= 5:
+            day += datetime.timedelta(days=1)
+            continue
+        iso = day.isoformat()
+        if iso in existing and not overwrite:
+            skipped += 1
+            day += datetime.timedelta(days=1)
+            continue
+        url = gx.expand_template(url_template, day, code)
+        try:
+            snap = gx.fetch_one_url(ad, url, code=code)
+        except Exception:
+            miss += 1                     # 404/节假日都走这里，正常
+            snap = None
+        if snap:
+            snap["as_of"] = snap.get("as_of") or iso
+            save_snapshot(snap, data_dir, overwrite=overwrite)
+            hit += 1
+            print("  %s  OK（%d 行）" % (iso, snap.get("n_rows") or 0))
+        time.sleep(sleep_sec)
+        day += datetime.timedelta(days=1)
+
+    total = hit + miss
+    print("\n回填完成：命中 %d / 尝试 %d（%.1f%%），已存在跳过 %d"
+          % (hit, total, (hit / total * 100) if total else 0.0, skipped))
+    if hit == 0 and total:
+        print("一个都没命中 → 服务器很可能只保留当日文件（历史被删或改名）。\n"
+              "改走：官方备兑月报（monthly-urls）+ 中期/年度报告 + wayback。")
+    return hit
 
 
 # ---------- 官方月报（月度覆盖率的权威来源） ----------
@@ -326,6 +406,14 @@ def main(argv=None):
     sw.add_argument("--since", default="20240228")
     sw.add_argument("--until", default=None)
     sw.add_argument("--url", action="append", default=[], help="额外的 CDX url 模式")
+    sb = sub.add_parser("backfill-csv", help="按日期枚举回填历史持仓文件")
+    sb.add_argument("--from-url", default=None,
+                    help="任意一个已知持仓下载地址（chrome://downloads 复制），自动推模板")
+    sb.add_argument("--url-template", default=None,
+                    help="日期模板，如 'https://.../{code}_full_holdings_{date}.csv'")
+    sb.add_argument("--since", default="20240229")
+    sb.add_argument("--until", default=None)
+    sb.add_argument("--sleep", type=float, default=0.4, help="每次请求间隔秒数")
     sm = sub.add_parser("monthly-urls", help="官方备兑月报候选地址")
     sm.add_argument("--start", default="2024-03")
     sm.add_argument("--end", default=None)
@@ -358,6 +446,11 @@ def main(argv=None):
     elif a.cmd == "wayback":
         wayback_backfill(a.code, a.data_dir, since=a.since, until=a.until,
                          extra_urls=a.url, overwrite=a.overwrite)
+        rebuild_report(a.data_dir, a.vol, levels)
+    elif a.cmd == "backfill-csv":
+        backfill_by_url(a.code, a.data_dir, url_template=a.url_template,
+                        from_url=a.from_url, since=a.since, until=a.until,
+                        sleep_sec=a.sleep, overwrite=a.overwrite)
         rebuild_report(a.data_dir, a.vol, levels)
     elif a.cmd == "monthly-urls":
         monthly_urls(a.start, a.end, a.check)

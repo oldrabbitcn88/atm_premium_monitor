@@ -432,9 +432,25 @@ def compute_coverage(snapshot, index_level=None, vol_annual=0.20, rate=0.0):
             return None
         return num / long_index_equiv
 
+    # 官网"期權持倉"表自带的官方口径（名義敞口佔資產淨值比例），可直接对照
+    official_pct_nav = None
+    nav_implied = None
+    ot = snapshot.get("option_table") or []
+    if ot:
+        pcts = [o.get("notional_pct_nav") for o in ot if o.get("notional_pct_nav") is not None]
+        nots = [o.get("notional") for o in ot if o.get("notional") is not None]
+        if pcts:
+            official_pct_nav = sum(abs(x) for x in pcts)
+        if pcts and nots and official_pct_nav:
+            nav_implied = sum(abs(x) for x in nots) / official_pct_nav
+
     result = {
         "as_of": as_of,
         "fund": snapshot.get("fund"),
+        # 官方口径：分母是资产净值 NAV（含现金、扣期权负债）
+        "official_coverage_pct_nav": (round(official_pct_nav, 6)
+                                      if official_pct_nav is not None else None),
+        "nav_implied": round(nav_implied, 2) if nav_implied else None,
         "source_url": snapshot.get("source_url"),
         "index_level": idx,
         "index_level_source": idx_source,
@@ -470,6 +486,20 @@ def compute_coverage(snapshot, index_level=None, vol_annual=0.20, rate=0.0):
     for k in ("coverage_spot", "coverage_strike", "coverage_delta_est"):
         if result[k] is not None:
             result[k] = round(result[k], 6)
+
+    # 完整性自检：持仓文件只抓到前十大、或漏了期货/ETF 腿时，分母会明显偏小
+    if nav_implied and long_index_equiv:
+        ratio = long_index_equiv / nav_implied
+        result["long_vs_nav"] = round(ratio, 6)
+        if ratio < 0.8:
+            warnings.append(
+                "多头名义仅为资产净值的 %.1f%%，持仓多半不完整（例如只拿到前十大持股），"
+                "此时 coverage_spot/strike 会虚高，请以 official_coverage_pct_nav 为准"
+                % (ratio * 100))
+    cs = result.get("coverage_spot")
+    if cs is not None and (cs > 1.5 or cs < 0.5):
+        warnings.append("覆盖比率 %.1f%% 偏离正常区间（满额备兑应在 100%% 附近），"
+                        "请先核对分母是否完整、期货乘数是否取对" % (cs * 100))
     return result
 
 

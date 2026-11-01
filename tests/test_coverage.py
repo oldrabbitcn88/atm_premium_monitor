@@ -276,3 +276,114 @@ class TestOtherFormats(unittest.TestCase):
 def guess_as_of_safe(text):
     from backend.data.globalx_adapter import guess_as_of
     return guess_as_of(text)
+
+
+# ---------- 用官网真实披露数据做的回归测试（2026-10-29） ----------
+
+REAL_OPTION_HTML = """<table>
+<tr><th>期權持倉</th><th>名義敞口</th><th>名義敞口佔資產淨值比例 (%)</th><th>行權</th>
+<th>行權前的可能溢價</th><th>到期日</th><th>到期日前的天數</th><th>指數價格</th></tr>
+<tr><td>Short HSI WEEKLY OPTI 23,550 Call Option</td><td>HKD$-3,076,459,100.00</td>
+<td>-97.35%</td><td>23,550</td><td>2.58%</td><td>10/30/2026</td><td>1</td><td>22,959</td></tr>
+</table>"""
+
+REAL_TOP10 = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "fixtures", "real_top10_3419_20261029.csv")
+
+
+class TestRealWebsiteData(unittest.TestCase):
+    """官网 2026-10-29 实际披露的期权持仓表与每日持股列名"""
+
+    def test_option_table_parsed(self):
+        from backend.data.globalx_adapter import parse_option_table
+        o = parse_option_table(REAL_OPTION_HTML)[0]
+        self.assertEqual(o["notional"], -3076459100.0)       # "HKD$-3,076,459,100.00"
+        self.assertAlmostEqual(o["notional_pct_nav"], -0.9735, places=6)
+        self.assertEqual(o["strike"], 23550.0)
+        self.assertEqual(o["index_price"], 22959.0)
+        self.assertAlmostEqual(o["premium_pct"], 0.0258, places=6)
+        self.assertEqual(o["dte"], 1.0)
+
+    def test_official_notional_uses_spot_times_50(self):
+        """官网名義敞口 = 张数 × 现货指数 × 50，和本仓库的现货口径一致"""
+        from backend.data.globalx_adapter import parse_option_table, option_table_to_rows
+        o = parse_option_table(REAL_OPTION_HTML)[0]
+        contracts = round(abs(o["notional"]) / (o["index_price"] * 50))
+        self.assertEqual(contracts, 2680)
+        # 反算回去应当还原官网数字（指数价格被官网四舍五入到整数，故留 0.01% 容差）
+        implied_idx = abs(o["notional"]) / (contracts * 50)
+        self.assertAlmostEqual(implied_idx, o["index_price"], delta=1.0)
+        rows = option_table_to_rows([o])
+        self.assertEqual(rows[0]["quantity"], -2680)
+        self.assertEqual(rows[0]["strike"], 23550.0)
+        self.assertEqual(rows[0]["expiry"], "2026-10-30")    # 10/30/2026 美式月/日/年
+
+    def test_implied_nav(self):
+        from backend.data.globalx_adapter import parse_option_table
+        o = parse_option_table(REAL_OPTION_HTML)[0]
+        nav = abs(o["notional"]) / abs(o["notional_pct_nav"])
+        self.assertAlmostEqual(nav / 1e8, 31.60, places=1)   # 约 31.6 亿港元
+
+    def test_short_weekly_option_classified(self):
+        name = "Short HSI WEEKLY OPTI 23,550 Call Option"
+        self.assertEqual(classify({"name": name, "asset_class": "Options"}), BUCKET_CALL_SHORT)
+        self.assertEqual(parse_strike(name), 23550.0)
+        self.assertEqual(multiplier_for(name), 50.0)         # 恒指，非小型恒指
+
+    def test_real_holdings_columns(self):
+        """官网每日持股的繁体列名要能映射上"""
+        snap = load_local_file(REAL_TOP10, code="3419")
+        self.assertEqual(snap["as_of"], "2026-10-29")
+        self.assertEqual(snap["n_rows"], 10)
+        rows = {r["name"]: r for r in snap["rows"]}
+        t = rows["騰訊"]
+        self.assertEqual(t["ticker"], "700 HK")
+        self.assertEqual(t["price"], 377.6)
+        self.assertEqual(t["quantity"], 416324.0)
+        self.assertEqual(t["market_value"], 157203942.40)
+        self.assertAlmostEqual(t["weight"], 4.97, places=2)
+        self.assertEqual(t["bucket"], BUCKET_EQUITY)
+
+    def test_attach_option_table_merges_legs(self):
+        """每日持股 CSV 里没有期权腿，必须靠页面期权表补上，否则分子是空的"""
+        from backend.data.globalx_adapter import attach_option_table
+        snap = load_local_file(REAL_TOP10, code="3419")
+        self.assertIsNone(compute_coverage(snap)["coverage_spot"])   # 合并前：算不出
+        attach_option_table(snap, REAL_OPTION_HTML)
+        self.assertEqual(snap["index_level"], 22959.0)               # 官网给的点位
+        r = compute_coverage(snap)
+        self.assertEqual(r["short_call_contracts"], 2680)
+        self.assertAlmostEqual(r["official_coverage_pct_nav"], 0.9735, places=6)
+        self.assertAlmostEqual(r["nav_implied"] / 1e8, 31.60, places=1)
+        self.assertIsNotNone(r["coverage_spot"])
+
+
+class TestUrlTemplate(unittest.TestCase):
+    def test_derive_from_real_filename(self):
+        from backend.data.globalx_adapter import derive_url_template, expand_template
+        import datetime as dt
+        url = "https://www.globalxetfs.com.hk/x/y/3419_full_holdings_20261029.csv"
+        tpl, as_of = derive_url_template(url)
+        self.assertEqual(as_of, "2026-10-29")
+        self.assertTrue(tpl.endswith("3419_full_holdings_{date}.csv"))
+        self.assertEqual(expand_template(tpl, dt.date(2024, 3, 1)),
+                         "https://www.globalxetfs.com.hk/x/y/3419_full_holdings_20240301.csv")
+
+    def test_no_date_in_url(self):
+        from backend.data.globalx_adapter import derive_url_template
+        self.assertEqual(derive_url_template("https://x.hk/holdings.csv"), (None, None))
+
+
+class TestCompletenessGuard(unittest.TestCase):
+    """只拿到前十大持股时，分母不完整，必须告警而不是默默给个虚高的数"""
+
+    def test_partial_holdings_warns(self):
+        from backend.data.globalx_adapter import attach_option_table
+        snap = load_local_file(REAL_TOP10, code="3419")
+        attach_option_table(snap, REAL_OPTION_HTML)
+        r = compute_coverage(snap)
+        self.assertLess(r["long_vs_nav"], 0.4)               # 前十大仅约 33% NAV
+        self.assertTrue(any("持仓多半不完整" in w for w in r["warnings"]))
+        self.assertTrue(any("偏离正常区间" in w for w in r["warnings"]))
+        # 官方口径不受分母不完整影响，仍然可信
+        self.assertAlmostEqual(r["official_coverage_pct_nav"], 0.9735, places=6)
