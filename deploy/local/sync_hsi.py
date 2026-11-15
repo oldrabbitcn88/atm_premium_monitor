@@ -9,7 +9,7 @@
   python sync_hsi.py                          # 仅处理当月（原行为）
   python sync_hsi.py --upload                 # 更新后 git commit + push 到 GitHub
   python sync_hsi.py --month 2026-09 --month 2026-10 --upload   # 补采指定的历史月份
-  python sync_hsi.py --missing --upload       # 自动补采最后一个点之后所有缺的月份
+  python sync_hsi.py --missing --upload       # 自动补采最近 4 个月里所有缺的月份（含中间空洞）
 
 补采时效：补采 M 月要用 M+1 月到期的期权合约在 M 月交割日的日K。
 富途只保留已退市合约约 1 个月的历史，即最晚到 M+1 月交割日后约 30 天；
@@ -53,22 +53,27 @@ def _next_ym(y, m):
     return (y + 1, 1) if m == 12 else (y, m + 1)
 
 
-def plan_months(hist, today, months=None, missing=False, force=False):
+MISSING_LOOKBACK_MONTHS = 4   # --missing 回看的月数（更早的早已超出富途历史窗口）
+
+
+def plan_months(hist, today, months=None, missing=False, force=False,
+                lookback=MISSING_LOOKBACK_MONTHS):
     """决定本次要采哪些月份。
     :param months: 显式指定 ["2026-09", ...]；None 表示不指定
-    :param missing: True 时补"最后一个点之后到当月"之间所有缺的月份
+    :param missing: True 时扫最近 lookback 个月（含当月）里所有没记录的月份——
+        包括夹在中间的空洞（如有 08、10 而缺 09），不只是最后一个点之后的
     :return: [(ym, exp_day, action, note)]，action ∈ realtime / backfill / skip
     """
     recorded = {(h.get("ts") or "")[:7] for h in hist}
     if months:
         targets = sorted(set(months))
     elif missing:
-        last = max(recorded) if recorded else today.strftime("%Y-%m")
-        y, m = _next_ym(*map(int, last.split("-")))
+        y, m = today.year, today.month
         targets = []
-        while (y, m) <= (today.year, today.month):
+        for _ in range(lookback):
             targets.append(f"{y:04d}-{m:02d}")
-            y, m = _next_ym(y, m)
+            y, m = (y - 1, 12) if m == 1 else (y, m - 1)
+        targets.sort()
     else:
         targets = [today.strftime("%Y-%m")]
 
@@ -89,8 +94,13 @@ def plan_months(hist, today, months=None, missing=False, force=False):
             late = (today - contract_exp).days
             note = "补采交割日日K"
             if late > FUTU_HISTORY_DAYS:
-                note += (f"（所需合约已于 {contract_exp} 到期 {late} 天，"
-                         "很可能超出富途历史窗口，失败请改用 import_hsi_csv.py）")
+                hint = (f"（所需合约已于 {contract_exp} 到期 {late} 天，"
+                        "很可能超出富途历史窗口，请改用 import_hsi_csv.py 补费率）")
+                if missing and not months:
+                    # 自动补缺模式下不再徒劳重试，否则每天的计划任务都会报失败
+                    plan.append((ym, exp_day, "skip", "超出富途历史窗口" + hint))
+                    continue
+                note += hint
             elif late > 0:
                 note += f"（所需合约已于 {contract_exp} 到期，约剩 {FUTU_HISTORY_DAYS - late} 天窗口，尽快）"
             plan.append((ym, exp_day, "backfill", note))
@@ -185,7 +195,7 @@ def parse_args(argv):
     p.add_argument("--month", action="append", default=[],
                    help="补采指定月份 YYYY-MM，可重复")
     p.add_argument("--missing", action="store_true",
-                   help="补采最后一个点之后到当月之间所有缺的月份")
+                   help="补采最近 4 个月里所有缺的月份（含中间空洞）")
     p.add_argument("--force", action="store_true", help="已记录的月份也重新采集覆盖")
     a = p.parse_args(argv)
     for ym in a.month:

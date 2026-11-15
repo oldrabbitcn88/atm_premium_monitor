@@ -131,6 +131,26 @@ class TestHsiPlan(unittest.TestCase):
         self.assertEqual(got["2026-10"][0], "backfill")
         self.assertEqual(got["2026-11"][0], "skip")             # 11-27 未到
 
+    def test_missing_finds_hole_in_middle(self):
+        """main 上的真实现状：有 08-28、10-29，缺 09 —— 中间空洞也要能扫到"""
+        hist = [{"ts": "2026-08-28"}, {"ts": "2026-10-29"}]
+        plan = {ym: act for ym, _e, act, _n in
+                sh.plan_months(hist, dt.date(2026, 11, 15), missing=True)}
+        self.assertEqual(plan["2026-09"], "backfill")
+        self.assertEqual(plan["2026-10"], "skip")      # 已记录
+        self.assertEqual(plan["2026-11"], "skip")      # 未到
+        self.assertNotIn("2026-07", plan)              # 超出 4 个月回看
+
+    def test_missing_skips_months_beyond_futu_window(self):
+        """自动模式下超窗口的空洞直接跳过，免得计划任务天天报失败；显式指定仍会尝试"""
+        hist = [{"ts": "2026-08-28"}, {"ts": "2026-10-29"}]
+        auto = {ym: (a, n) for ym, _e, a, n in
+                sh.plan_months(hist, dt.date(2026, 12, 15), missing=True)}
+        self.assertEqual(auto["2026-09"][0], "skip")   # 所需合约 10-29 到期已 47 天
+        self.assertIn("import_hsi_csv.py", auto["2026-09"][1])
+        explicit = sh.plan_months(hist, dt.date(2026, 12, 15), months=["2026-09"])
+        self.assertEqual(explicit[0][2], "backfill")
+
     def test_default_is_current_month_only(self):
         plan = sh.plan_months(self.HIST, dt.date(2026, 11, 15))
         self.assertEqual([p[0] for p in plan], ["2026-11"])
