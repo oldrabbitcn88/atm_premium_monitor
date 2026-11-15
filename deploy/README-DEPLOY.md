@@ -178,8 +178,17 @@ un_hsi_job.ps1 -TestOnly
 | 交割日**之后**（`sync_hsi.py` 自动补采） | best-effort，取决于历史K线权限；无权限时明确报错不静默 |
 | 事后从港交所费率表补（`import_hsi_csv.py`） | **只有费率**，没有点位/行权价/权利金 |
 
-所以完整明细只有交割日当天机器开着才拿得到。错过了用
-`python deploy\local\import_hsi_csv.py --upload` 至少把费率补上，明细列会是空的。
+计划任务以 `--missing --upload` 调用：除当月外，**此前漏掉的月份也会自动补采**
+（机器没开、OpenD 掉线的那几个月会自愈）。也可手动指定月份：
+
+```
+python deploy\local\sync_hsi.py --month 2026-09 --month 2026-10 --upload
+python deploy\local\sync_hsi.py --missing --upload
+```
+
+**补采有时限**：补 M 月要用 M+1 月到期合约在 M 月交割日的日K，富途只保留已退市合约
+约 1 个月历史，即最晚到 **M+1 月交割日后约 30 天**。脚本会在日志里提示剩余天数；
+超窗口用 `python deploy\local\import_hsi_csv.py --upload` 至少把费率补上，明细列会是空的。
 
 ## 四、验证
 
@@ -189,7 +198,7 @@ un_hsi_job.ps1 -TestOnly
 | COS 数据 | `curl -sS -o /dev/null -D - <桶域名>/hsi.json` | HTTP 200，`Content-Type: application/json` |
 | 页面发布 | workflow 的"验证站点"步 | 页面 200、echarts 200、COS 两个 json 200 |
 | 前端渲染 | 浏览器打开站点 URL | 三卡片+三图+明细表正常，hover 显示明细（**不再弹下载**） |
-| 本机同步 | `python deploy/local/sync_hsi.py` | OpenD 在线时连接成功；交割日写入 |
+| 本机同步 | `python deploy/local/sync_hsi.py --missing` | 先打印每个月的计划（skip/realtime/backfill）；OpenD 在线时补采写入 |
 | 数据更新 | 交割日后次日打开页面 | 最新月度日期变为当月交割日 |
 
 ## 五、日常维护

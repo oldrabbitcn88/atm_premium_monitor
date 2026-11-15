@@ -104,7 +104,8 @@ try {
     Invoke-WithTimeout "deploy\local\opend_selftest.py" @()
   } else {
     Write-Log "运行同步脚本"
-    Invoke-WithTimeout "deploy\local\sync_hsi.py" @("--upload")
+    # --missing：除当月外，顺带补采此前漏掉的月份（机器没开/OpenD 掉线的那几个月会自愈）
+    Invoke-WithTimeout "deploy\local\sync_hsi.py" @("--missing", "--upload")
   }
 } finally {
   if ($startedByUs -and -not $KeepOpenD) {
