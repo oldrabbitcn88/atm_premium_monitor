@@ -86,60 +86,6 @@ def etf_rule_day(year, month):
     return datetime.date(year, month, wed[3]) if len(wed) >= 4 else None
 
 
-MARKET_CLOSE_CN = datetime.time(15, 5)   # A股 15:00 收盘，留 5 分钟让收盘价落定
-MARKET_OPEN_CN = datetime.time(9, 15)    # 集合竞价开始前，行情仍是上一交易日的
-
-
-def _prev_weekday(d):
-    d -= datetime.timedelta(days=1)
-    while d.weekday() >= 5:
-        d -= datetime.timedelta(days=1)
-    return d
-
-
-def resolve_data_day(quote_date, now, rule_fn, window=EXPIRY_WINDOW_DAYS):
-    """决定这次抓到的行情属于哪一天，以及该不该落点。
-
-    以前用运行时的钟点当"今天"：08-26 00:35 由 push 触发的一次运行把 08-25 收盘价
-    记成了 08-26 交割日的点；计划任务又常拖到北京时间次日凌晨才跑，
-    同样会把交割日收盘价记成第二天。现改为以行情自带的日期为准。
-
-    :param quote_date: 行情日期 'YYYYMMDD' 或 None
-    :param now: 北京时间 datetime
-    :return: (day, note)；day 为 None 表示本次不落点，note 说明原因
-    """
-    note = ""
-    if quote_date and re.fullmatch(r"\d{8}", quote_date):
-        day = datetime.datetime.strptime(quote_date, "%Y%m%d").date()
-        if day > now.date():
-            return None, f"行情日期 {day} 晚于当前时间，数据可疑"
-        if day == now.date() and now.time() < MARKET_CLOSE_CN:
-            return None, f"{day} 尚未收盘（盘中价），不落点"
-    else:
-        # 取不到行情日期时按时钟退化，并在报告里标出
-        t = now.time()
-        if t >= MARKET_CLOSE_CN:
-            day = now.date()
-        elif t < MARKET_OPEN_CN:
-            day = _prev_weekday(now.date())
-        else:
-            return None, "行情无日期且处于交易时段，不落点"
-        note = f"（警告：行情无日期字段，按时钟推定为 {day}）"
-    rule = rule_fn(day.year, day.month)
-    if not rule or not 0 <= (day - rule).days <= window:
-        return None, f"非交割日(行情日{day}，规则日{rule}){note}"
-    return day, note
-
-
-def in_window_recently(today, rule_fn, lookback=6, window=EXPIRY_WINDOW_DAYS):
-    for i in range(lookback):
-        d = today - datetime.timedelta(days=i)
-        rule = rule_fn(d.year, d.month)
-        if rule and 0 <= (d - rule).days <= window:
-            return True
-    return False
-
-
 def qq_price(code):
     """腾讯行情：sh000300 / sh510500 → (最新价, 行情日期YYYYMMDD)"""
     r = requests.get(QQ_QUOTE_URL.format(codes=code), headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
@@ -151,18 +97,22 @@ def qq_price(code):
     if len(fields) < 4:
         return None, None
     price = float(fields[3])
-    return price, quote_date_from_fields(fields)
+    # 字段[30] 为行情时间戳 YYYYMMDDHHMMSS（收盘后通常是 15:xx~16:xx 的盘后时间）
+    ts = fields[30] if len(fields) > 30 else ""
+    return price, ts
 
 
-def quote_date_from_fields(fields):
-    """腾讯行情的行情时间戳（YYYYMMDDHHMMSS）通常在索引 30；
-    位置不对时在全部字段里找 14 位时间戳兜底。找不到返回 None。"""
-    cands = ([fields[30]] if len(fields) > 30 else []) + list(fields)
-    for f in cands:
-        f = (f or "").strip()
-        if re.fullmatch(r"20\d{12}", f):
-            return f[:8]
-    return None
+def session_of(ts):
+    """行情时间戳 → (该行情所属交易日, 是否已收盘)；解析失败返回 (None, False)
+
+    交割日判断必须以行情自身的日期为准，而不是脚本运行的日期：
+    GitHub 定时任务常延迟 5~10 小时、会跨过北京午夜，推送也会在任意时刻触发运行，
+    若按运行日期判断，就会把前一交易日的收盘价记成交割日数据（2026-08 中证500 即栽在这里）。
+    """
+    if not ts or len(ts) < 12 or not ts[:12].isdigit():
+        return None, False
+    d = datetime.date(int(ts[:4]), int(ts[4:6]), int(ts[6:8]))
+    return d, ts[8:12] >= "1500"
 
 
 def cffex_io_quotes():
@@ -180,21 +130,16 @@ def cffex_io_quotes():
 
 
 def sse_etf_quotes(etf_code, month):
-    """上交所 yunhq T型：返回 ([(简称, 最新价)], 行情日期YYYYMMDD或None)"""
+    """上交所 yunhq T型：返回 [(简称, 最新价)]"""
     url = SSE_TSTYLE.format(etf=etf_code, mm=f"{month:02d}")
     for _ in range(3):
         try:
             d = requests.get(url, headers=SSE_HEADERS, timeout=8).json()
             if d.get("total", 0) > 0:
-                qd = str(d.get("date") or "") or None
-                return [(it[1], float(it[2])) for it in d.get("list", [])], qd
+                return [(it[1], float(it[2])) for it in d.get("list", [])]
         except Exception:
             continue
-    return [], None
-
-
-class QuoteDateMismatch(Exception):
-    """期权行情日期与标的行情日期不一致（例如一边已开新交易日），本次不落点"""
+    return []
 
 
 def parse_sse_name(name):
@@ -239,9 +184,7 @@ def fetch_etf(etf_price, today):
     ny, nm = next_month_ym(today)
     for off in range(4):
         yy, mm = ny + (nm - 1 + off) // 12, (nm - 1 + off) % 12 + 1
-        quotes, sse_date = sse_etf_quotes("510500", mm)
-        if quotes and sse_date and sse_date != today.strftime("%Y%m%d"):
-            raise QuoteDateMismatch(f"上交所期权行情日期 {sse_date} ≠ 数据日 {today}")
+        quotes = sse_etf_quotes("510500", mm)
         calls = [q for q in quotes if parse_sse_name(q[0]) and parse_sse_name(q[0])[0] == "购"]
         for name, price in calls:
             t, s, adj = parse_sse_name(name)
@@ -273,50 +216,40 @@ def update_point(items, key, ts, underlying, strike, opt_price, py, expiry, cont
     return "appended"
 
 
+def collect(items, report, key, qq_code, rule_fn, fetch_fn):
+    """按行情自身日期判断是否落在交割窗口内，是则采集并记为该交易日的数据点"""
+    price, qts = qq_price(qq_code)
+    if not price:
+        report.append(f"{key}: 腾讯行情失败"); return
+    day, closed = session_of(qts)
+    if day is None:
+        report.append(f"{key}: 行情时间戳无法解析({qts!r})，不记录"); return
+    rule = rule_fn(day.year, day.month)
+    if not (rule and 0 <= (day - rule).days <= EXPIRY_WINDOW_DAYS):
+        report.append(f"{key}: 行情日 {day} 非交割日(规则日{rule})"); return
+    if not closed:
+        report.append(f"{key}: 行情日 {day} 尚未收盘(时间戳 {qts})，不记录"); return
+    got = fetch_fn(price, day)
+    if not got:
+        report.append(f"{key}: 期权行情获取失败"); return
+    strike, opt, code = got
+    py = opt / price
+    ny, nm = next_month_ym(day)
+    act = update_point(items, key, day.strftime("%Y-%m-%d"), price,
+                       strike, opt, round(py, 6), f"{ny:04d}-{nm:02d}", code)
+    report.append(f"{key}: {act} | 行情日{day} 收盘{price} ATM{strike} 权利金{opt} PY={py:.4%}")
+
+
 def main():
-    today = now_cn().date()
-    print(f"[build_data] 运行时间: {today}")
+    print(f"[build_data] 运行时间: {now_cn():%Y-%m-%d %H:%M}（交割日以行情日期为准）")
     with open(DATA_FILE, encoding="utf-8") as f:
         payload = json.load(f)
     items = payload["items"]
     before = json.dumps(items, sort_keys=True, ensure_ascii=False)
     report = []
 
-    now = now_cn()
-    specs = [
-        # key,     腾讯代码,    规则日,         取期权函数
-        ("CSI300", "sh000300", io_rule_day,  fetch_io),
-        ("CSI500", "sh510500", etf_rule_day, fetch_etf),
-    ]
-    for key, qcode, rule_fn, fetch in specs:
-        # 先用时钟粗筛：最近 6 天都不在交割窗口里就不必联网
-        # （覆盖"拖到次日凌晨才跑""长假后第一次运行"时行情日期早于今天的情况）
-        if not in_window_recently(now.date(), rule_fn):
-            report.append(f"{key}: 非交割窗口(规则日{rule_fn(today.year, today.month)})")
-            continue
-        price, qdate = qq_price(qcode)
-        if not price:
-            report.append(f"{key}: 腾讯行情失败")
-            continue
-        day, note = resolve_data_day(qdate, now, rule_fn)
-        if day is None:
-            report.append(f"{key}: {note}")
-            continue
-        try:
-            got = fetch(price, day)
-        except QuoteDateMismatch as e:
-            report.append(f"{key}: {e}，本次不落点")
-            continue
-        if not got:
-            report.append(f"{key}: 期权行情获取失败")
-            continue
-        strike, opt, code = got
-        py = opt / price
-        ny, nm = next_month_ym(day)
-        act = update_point(items, key, day.strftime("%Y-%m-%d"), price, strike, opt,
-                           round(py, 6), f"{ny:04d}-{nm:02d}", code)
-        report.append(f"{key}: {act} | 数据日{day} 收盘{price} ATM{strike} "
-                      f"权利金{opt} PY={py:.4%}{note}")
+    collect(items, report, "CSI300", "sh000300", io_rule_day, fetch_io)
+    collect(items, report, "CSI500", "sh510500", etf_rule_day, fetch_etf)
 
     payload["generated_at"] = now_cn().strftime("%Y-%m-%d %H:%M:%S")
     with open(DATA_FILE, "w", encoding="utf-8") as f:

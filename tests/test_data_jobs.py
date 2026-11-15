@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""数据采集作业的回归测试：A股交割日落点（build_data）与恒指补采规划（sync_hsi）
+"""数据采集作业的回归测试：A股交割日落点（build_data，main 上的实现）与恒指补采规划（sync_hsi）
 
 用例直接复现两次真实事故：
 - 2026-08-26 北京时间 00:35，push 触发的运行把 08-25 收盘价记成了 08-26 交割日的点
@@ -34,84 +34,65 @@ def cn(y, mo, d, h, mi):
     return dt.datetime(y, mo, d, h, mi, tzinfo=CN)
 
 
-class TestResolveDataDay(unittest.TestCase):
+class TestSessionOf(unittest.TestCase):
+    """main 上 build_data 的行情日期判定（session_of）"""
+
+    def test_closed_session(self):
+        self.assertEqual(bd.session_of("20261016150300"), (dt.date(2026, 10, 16), True))
+
+    def test_intraday(self):
+        self.assertEqual(bd.session_of("20261125103000"), (dt.date(2026, 11, 25), False))
+
+    def test_unparseable(self):
+        for ts in ("", None, "2026-10-16", "abc"):
+            self.assertEqual(bd.session_of(ts), (None, False))
+
+
+class TestCollect(unittest.TestCase):
+    """用真实事故场景验证 main 上的 collect()：落点日期取行情日，而非运行日"""
+
+    def _run(self, qts, rule_fn=None, price=6.70):
+        items = {"K": {"history": [{"ts": "2026-10-28"}]}}
+        report = []
+        fetch = mock.Mock(return_value=(6.75, 0.15, "CODE"))
+        with mock.patch.object(bd, "qq_price", return_value=(price, qts)):
+            bd.collect(items, report, "K", "sh510500", rule_fn or bd.etf_rule_day, fetch)
+        return items["K"]["history"], report, fetch
+
     def test_incident_0826_push_before_open(self):
-        """08-26 00:35 运行，行情还是 08-25 的 → 08-25 不是交割日，不落点"""
-        day, note = bd.resolve_data_day("20260825", cn(2026, 8, 26, 0, 35), bd.etf_rule_day)
-        self.assertIsNone(day)
-        self.assertIn("非交割日", note)
+        """08-26 凌晨 push 触发时行情仍是 08-25 的 → 不是交割日，不落点"""
+        hist, report, fetch = self._run("20260825150300")
+        self.assertEqual(len(hist), 1)
+        fetch.assert_not_called()
+        self.assertIn("非交割日", report[0])
 
     def test_run_after_midnight_keeps_expiry_date(self):
-        """交割日 11-20(周五) 的任务拖到周六 01:47 才跑：仍记为 11-20"""
-        day, note = bd.resolve_data_day("20261120", cn(2026, 11, 21, 1, 47), bd.io_rule_day)
-        self.assertEqual(day, dt.date(2026, 11, 20))
-        self.assertEqual(note, "")
+        """交割日 11-20(周五) 的任务拖到周六凌晨才跑：行情日仍是 11-20"""
+        hist, report, fetch = self._run("20261120150300", rule_fn=bd.io_rule_day)
+        self.assertEqual(hist[-1]["ts"], "2026-11-20")
+        self.assertEqual(fetch.call_args[0][1], dt.date(2026, 11, 20))   # 按行情日取下月合约
+        self.assertEqual(hist[-1]["expiry"], "2026-12")
 
-    def test_intraday_run_on_expiry_day_skipped(self):
-        day, note = bd.resolve_data_day("20261125", cn(2026, 11, 25, 11, 0), bd.etf_rule_day)
-        self.assertIsNone(day)
-        self.assertIn("尚未收盘", note)
+    def test_intraday_on_expiry_day_not_recorded(self):
+        hist, report, fetch = self._run("20261125103000")
+        self.assertEqual(len(hist), 1)
+        self.assertIn("尚未收盘", report[0])
 
-    def test_evening_run_on_expiry_day(self):
-        day, _ = bd.resolve_data_day("20261125", cn(2026, 11, 25, 22, 30), bd.etf_rule_day)
-        self.assertEqual(day, dt.date(2026, 11, 25))
+    def test_evening_on_expiry_day_recorded(self):
+        hist, _r, _f = self._run("20261125150300")
+        self.assertEqual(hist[-1]["ts"], "2026-11-25")
+        self.assertAlmostEqual(hist[-1]["premium_yield"], round(0.15 / 6.70, 6))
 
     def test_holiday_shift_window(self):
-        """2026-06 第三个周五 06-19 为端午休市，顺延到 06-22(周一) 仍在窗口内"""
-        day, _ = bd.resolve_data_day("20260622", cn(2026, 6, 22, 21, 0), bd.io_rule_day)
-        self.assertEqual(day, dt.date(2026, 6, 22))
+        """2026-06 第三个周五 06-19 端午休市，顺延到 06-22(周一) 仍在窗口内"""
+        hist, _r, _f = self._run("20260622150300", rule_fn=bd.io_rule_day)
+        self.assertEqual(hist[-1]["ts"], "2026-06-22")
 
-    def test_future_quote_date_rejected(self):
-        day, note = bd.resolve_data_day("20261121", cn(2026, 11, 20, 22, 0), bd.io_rule_day)
-        self.assertIsNone(day)
-        self.assertIn("可疑", note)
-
-    def test_missing_date_fallbacks(self):
-        # 收盘后：当天
-        day, note = bd.resolve_data_day(None, cn(2026, 11, 20, 22, 0), bd.io_rule_day)
-        self.assertEqual(day, dt.date(2026, 11, 20))
-        self.assertIn("警告", note)
-        # 次日凌晨（周六）：上一交易日（周五）
-        day, _ = bd.resolve_data_day(None, cn(2026, 11, 21, 1, 47), bd.io_rule_day)
-        self.assertEqual(day, dt.date(2026, 11, 20))
-        # 盘中：不落点
-        day, note = bd.resolve_data_day("", cn(2026, 11, 20, 10, 0), bd.io_rule_day)
-        self.assertIsNone(day)
-
-
-class TestQuoteDateParsing(unittest.TestCase):
-    def test_field_30(self):
-        f = ["1", "沪深300", "000300", "4170.61"] + ["x"] * 26 + ["20261016150300"] + ["y"] * 5
-        self.assertEqual(bd.quote_date_from_fields(f), "20261016")
-
-    def test_scan_fallback_when_position_shifts(self):
-        f = ["1", "沪深300", "000300", "4170.61", "20261016150300"] + ["x"] * 40
-        self.assertEqual(bd.quote_date_from_fields(f), "20261016")
-
-    def test_no_timestamp(self):
-        self.assertIsNone(bd.quote_date_from_fields(["1", "x", "4170.61"]))
-
-
-class TestPreScreen(unittest.TestCase):
-    def test_in_window_recently(self):
-        self.assertTrue(bd.in_window_recently(dt.date(2026, 11, 21), bd.io_rule_day))   # 规则日次日
-        self.assertFalse(bd.in_window_recently(dt.date(2026, 11, 14), bd.io_rule_day))  # 离 11-20 还早
-        self.assertTrue(bd.in_window_recently(dt.date(2026, 11, 25), bd.etf_rule_day))
-
-
-class TestSseDateCrossCheck(unittest.TestCase):
-    def test_mismatch_raises(self):
-        quotes = [("500ETF购12月6750", 0.15)]
-        with mock.patch.object(bd, "sse_etf_quotes", return_value=(quotes, "20261126")):
-            with self.assertRaises(bd.QuoteDateMismatch):
-                bd.fetch_etf(6.672, dt.date(2026, 11, 25))
-
-    def test_match_ok(self):
-        quotes = [("500ETF购12月6750", 0.15)]
-        with mock.patch.object(bd, "sse_etf_quotes", return_value=(quotes, "20261125")):
-            strike, price, tcode = bd.fetch_etf(6.672, dt.date(2026, 11, 25))
-        self.assertEqual((strike, price), (6.75, 0.15))
-        self.assertEqual(tcode, "510500C2612M06750")
+    def test_unparseable_timestamp_not_recorded(self):
+        hist, report, fetch = self._run("")
+        self.assertEqual(len(hist), 1)
+        fetch.assert_not_called()
+        self.assertIn("无法解析", report[0])
 
 
 class TestHsiPlan(unittest.TestCase):
@@ -127,7 +108,7 @@ class TestHsiPlan(unittest.TestCase):
         plan = sh.plan_months(self.HIST, dt.date(2026, 11, 15), missing=True)
         got = {ym: (act, note) for ym, _e, act, note in plan}
         self.assertEqual(got["2026-09"][0], "backfill")
-        self.assertIn("约剩 13 天窗口", got["2026-09"][1])     # 合约 10-29 到期，已过 17 天
+        self.assertIn("到期 17 天", got["2026-09"][1])         # 合约 10-29 到期，已过 17 天
         self.assertEqual(got["2026-10"][0], "backfill")
         self.assertEqual(got["2026-11"][0], "skip")             # 11-27 未到
 

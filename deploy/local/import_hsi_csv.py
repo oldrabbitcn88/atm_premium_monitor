@@ -27,6 +27,32 @@ import sys
 BASE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(BASE, "..", ".."))
 HSI_JSON = os.path.join(BASE, "..", "data", "hsi.json")
+sys.path.insert(0, ROOT)
+from backend.engine import atm_strike  # noqa: E402
+
+QQ_KLINE = ("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+            "?param=hkHSI,day,{start},{end},15,")
+
+
+def hsi_close_on(day):
+    """恒指在 day 当日的收盘价（腾讯日线）；day 休市则取之前最近交易日。
+    返回 (实际交易日, 收盘价) 或 (None, None)。失败不抛错，补数据时尽力而为。"""
+    import urllib.request
+    start = (day - datetime.timedelta(days=10)).isoformat()
+    try:
+        req = urllib.request.Request(QQ_KLINE.format(start=start, end=day.isoformat()),
+                                     headers={"User-Agent": "Mozilla/5.0"})
+        raw = json.loads(urllib.request.urlopen(req, timeout=15).read().decode("utf-8"))
+        node = raw["data"]["hkHSI"]
+        rows = [(r[0], float(r[2])) for r in (node.get("day") or node.get("qfqday") or [])
+                if r[0] <= day.isoformat()]
+    except Exception as e:
+        print(f"[import_csv] 取 {day} 恒指收盘失败: {e}")
+        return None, None
+    if not rows:
+        return None, None
+    d, c = rows[-1]
+    return datetime.date.fromisoformat(d), c
 
 DEFAULT_CSV = os.path.join(
     "D:", os.sep, "微云同步助手", "philip's folder", "工作", "Hong Kong", "项目",
@@ -105,13 +131,26 @@ def main():
             continue
         exp = month_end_business_day(year, month)
         ny, nm = (year + 1, 1) if month == 12 else (year, month + 1)
-        hist.append({
+        rec = {
             "ts": exp.strftime("%Y-%m-%d"),
             "underlying": None, "strike": None, "option_price": None,
             "premium_yield": round(py, 6),
             "expiry": f"{ny:04d}-{nm:02d}",
             "contract": None,
-        })
+        }
+        # 交割日没采到明细（关机等），用当天恒指收盘把标的/行权价/合约/权利金补齐，
+        # 权利金按港交所 PY 反算，与其他月份口径一致
+        day, close = hsi_close_on(exp)
+        if close:
+            strike, _ = atm_strike(close, "HSI")
+            nexp = month_end_business_day(ny, nm)
+            rec.update({
+                "ts": day.strftime("%Y-%m-%d"),
+                "underlying": close, "strike": strike,
+                "option_price": round(py * close, 1), "option_price_derived": True,
+                "contract": f"HK.HSI{nexp.strftime('%y%m%d')}C{int(strike) * 1000}",
+            })
+        hist.append(rec)
         added.append(ym)
 
     if not added and not upgraded:
@@ -123,7 +162,6 @@ def main():
     with open(HSI_JSON, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False)
     print(f"[import_csv] 新增 {len(added)} 期" + (f": {', '.join(added)}" if added else "") + f"；升级 {len(upgraded)} 期临时值为港交所口径" + (f": {', '.join(upgraded)}" if upgraded else "") + f"（共 {len(hist)} 期）")
-    print("[import_csv] 注意：补进来的月份没有点位/行权价/权利金明细，前端明细表这几列会显示空")
 
     if args.upload:
         rel = os.path.relpath(os.path.normpath(HSI_JSON), ROOT)

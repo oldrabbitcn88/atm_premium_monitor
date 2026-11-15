@@ -12,8 +12,8 @@
   python sync_hsi.py --missing --upload       # 自动补采最近 4 个月里所有缺的月份（含中间空洞）
 
 补采时效：补采 M 月要用 M+1 月到期的期权合约在 M 月交割日的日K。
-富途只保留已退市合约约 1 个月的历史，即最晚到 M+1 月交割日后约 30 天；
-超过就只能用 import_hsi_csv.py 从港交所费率表补 PY（无明细）。
+富途对已退市合约的历史保留有限（约 1 个月，以实际返回为准，可能更短甚至取不到）；
+补不到就由 import_hsi_csv.py 从港交所费率表补入（run_hsi_job 每次运行后都会自动执行）。
 """
 import datetime
 import json
@@ -102,7 +102,8 @@ def plan_months(hist, today, months=None, missing=False, force=False,
                     continue
                 note += hint
             elif late > 0:
-                note += f"（所需合约已于 {contract_exp} 到期，约剩 {FUTU_HISTORY_DAYS - late} 天窗口，尽快）"
+                note += (f"（所需合约已于 {contract_exp} 到期 {late} 天，富途可能已不保留其历史；"
+                         "补不到则由港交所费率表兜底）")
             plan.append((ym, exp_day, "backfill", note))
     return plan
 
@@ -214,6 +215,15 @@ def main(argv=None):
     with open(HSI_JSON, encoding="utf-8") as f:
         payload = json.load(f)
     hist = payload["items"]["HSI"]["history"]
+
+    have = {(h.get("ts") or "")[:7] for h in hist}
+    if not args.month and not args.missing:
+        # 上月缺口检查：关机错过交割日（如 2026-09 国庆）时，只看当月会把上月静默漏掉
+        py_, pm_ = (today.year - 1, 12) if today.month == 1 else (today.year, today.month - 1)
+        if f"{py_:04d}-{pm_:02d}" not in have:
+            print(f"[sync_hsi] ⚠ 上月 {py_:04d}-{pm_:02d} 缺数据（交割日 "
+                  f"{monthly_expiry_of(py_, pm_)} 未采到）。可加 --missing 先试 OpenD 补采；"
+                  "补不到则更新港交所费率表 CSV，run_hsi_job 会自动用 import_hsi_csv 补入")
 
     plan = plan_months(hist, today, months=args.month or None,
                        missing=args.missing, force=args.force)

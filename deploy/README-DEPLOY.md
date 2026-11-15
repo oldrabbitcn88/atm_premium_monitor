@@ -186,9 +186,9 @@ python deploy\local\sync_hsi.py --month 2026-09 --month 2026-10 --upload
 python deploy\local\sync_hsi.py --missing --upload
 ```
 
-**补采有时限**：补 M 月要用 M+1 月到期合约在 M 月交割日的日K，富途只保留已退市合约
-约 1 个月历史，即最晚到 **M+1 月交割日后约 30 天**。脚本会在日志里提示剩余天数；
-超窗口用 `python deploy\local\import_hsi_csv.py --upload` 至少把费率补上，明细列会是空的。
+**补采不保证成功**：补 M 月要用 M+1 月到期合约在 M 月交割日的日K，而富途对已退市合约的
+历史保留有限（约 1 个月，以实际返回为准）。补不到时由 `import_hsi_csv.py` 从港交所费率表
+补入——`run_hsi_job.ps1` 每次运行后都会自动执行这一步，无需手动。
 
 ## 四、验证
 
