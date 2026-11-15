@@ -47,6 +47,7 @@ class TestColumnMapping(unittest.TestCase):
         self.assertIsNone(parse_number("—"))
         self.assertIsNone(parse_number(""))
         self.assertEqual(parse_number("HK$ 98.40"), 98.40)
+        self.assertEqual(parse_number("港元 $3,177,982,033.03"), 3177982033.03)
 
 
 class TestContractParsing(unittest.TestCase):
@@ -483,7 +484,9 @@ class TestFetchCli(unittest.TestCase):
 class TestFundFacts(unittest.TestCase):
     """官网「期權詳情」键值表与资产配置表（结构照 2026-11-12 实抓页面）"""
 
-    HTML = ("<table><tr><th>總資產淨值(以港元計算)</th><th>HKD 3,178,362,136.84</th></tr>"
+    HTML = ("<table><tr><th>上市交易所</th><th>香港交易所</th></tr>"
+            "<tr><td>總資產淨值</td><td>港元 $3,177,982,033.03</td></tr></table>"   # 交易資料：上市类别
+            "<table><tr><th>總資產淨值(以港元計算)</th><th>HKD 3,178,362,136.84</th></tr>"
             "<tr><td>恒生指數收市價</td><td>24,008.55</td></tr></table>"
             "<table><tr><th>&nbsp;</th><th>&nbsp;</th><th>比率 (%)</th></tr>"
             "<tr><td></td><td>現金</td><td>32.0</td></tr>"
@@ -492,7 +495,7 @@ class TestFundFacts(unittest.TestCase):
     def test_parse(self):
         from backend.data.globalx_adapter import parse_fund_facts
         f = parse_fund_facts(self.HTML)
-        self.assertAlmostEqual(f["nav_total"], 3178362136.84, places=2)
+        self.assertAlmostEqual(f["nav_total"], 3178362136.84, places=2)   # 取全基金口径，非上市类别
         self.assertAlmostEqual(f["index_close"], 24008.55, places=2)
         self.assertAlmostEqual(f["cash_pct"], 0.32, places=6)
 
