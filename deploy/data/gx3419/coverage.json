@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-15T11:45:55+08:00",
+ "generated_at": "2026-11-15T12:21:19+08:00",
  "note": "备兑覆盖比率 = 卖出认购期权标的名义 / (正股市值+指数ETF市值+指数期货多头名义)",
  "series": [
   {
@@ -10,25 +10,25 @@
    "source_url": "https://www.globalxetfs.com.hk/zh-hant/funds/covered-call-etf/",
    "index_level": 24008.55,
    "index_level_source": "param",
-   "equity_mv": 2254550356.83,
+   "equity_mv": 2154831706.83,
    "index_etf_mv": 0.0,
-   "futures_notional": 0.0,
-   "long_index_equiv": 2254550356.83,
-   "cash_mv": 0.0,
+   "futures_notional": 1073284000.0,
+   "long_index_equiv": 3228115706.83,
+   "cash_mv": 54960000.0,
    "other_mv": 0.0,
    "short_call_contracts": 2674.0,
    "short_call_mv": -133700.0,
    "short_call_spot_notional": 3209943135.0,
    "short_call_strike_notional": 3315760000.0,
-   "coverage_spot": 1.423762,
-   "coverage_strike": 1.470697,
-   "coverage_delta_est": 0.001411,
+   "coverage_spot": 0.994371,
+   "coverage_strike": 1.02715,
+   "coverage_delta_est": 0.000985,
    "delta_vol_assumed": 0.2,
    "wavg_strike": 24800.0,
    "wavg_moneyness": 0.032965,
    "wavg_dte": 1.0,
    "n_call_legs": 1,
-   "n_future_legs": 0,
+   "n_future_legs": 1,
    "put_legs": [],
    "call_legs": [
     {
@@ -44,17 +44,28 @@
      "dte": 1
     }
    ],
-   "future_legs": [],
+   "future_legs": [
+    {
+     "name": "HANG SENG IDX FUT 11/27/26",
+     "ticker": "HIX6",
+     "contracts": 895.0,
+     "price": 23984.0,
+     "multiplier": 50.0,
+     "notional": 1073284000.0,
+     "expiry": "2026-11-27",
+     "market_value": 44758650.0
+    }
+   ],
    "bucket_counts": {
-    "EQUITY": 97,
+    "EQUITY": 95,
+    "CASH": 1,
+    "FUTURE_LONG": 1,
     "CALL_SHORT": 1
    },
-   "warnings": [
-    "已披露多头仅为资产净值的 70.9%：官网持股表不逐项披露恒指期货多头（资产配置显示现金 32.0%，期货敞口在其背后），coverage_spot/strike 只是相对已披露正股、偏高；以 official_coverage_pct_nav 为准"
-   ],
+   "warnings": [],
    "nav_total": 3178362136.84,
    "cash_pct_nav": 0.32,
-   "long_vs_nav": 0.709343
+   "long_vs_nav": 1.015654
   }
  ]
 }

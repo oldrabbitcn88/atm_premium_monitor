@@ -49,14 +49,17 @@ _URL_PAT = re.compile(r"""["'(]((?:https?:)?//[^"'()\s]+|/[^"'()\s]+)["')]""")
 # ---------- 列名别名（小写去空格后匹配） ----------
 COLUMN_ALIASES = {
     "name": ["name", "securityname", "holdingname", "description", "securitydescription",
+             "nameofsecurities", "nameofsecurity", "securitiesname",
              "security", "holding", "stockname", "instrument", "instrumentname",
              "名稱", "名称", "證券名稱", "证券名称", "持倉名稱", "持仓名称", "股票名稱", "股票名称",
              "資產名稱", "资产名称"],
     "ticker": ["ticker", "symbol", "code", "stockcode", "securityid", "identifier", "isin",
+               "exchangeticker", "tickercode",
                "bloombergticker", "bbgticker", "sedol", "ric",
                "代號", "代号", "股票代號", "股票代码", "證券代號", "证券代码", "編號", "编号",
                "股份代號", "股份代号", "股份編號", "股份编号", "彭博代號", "彭博代码"],
     "quantity": ["quantity", "shares", "sharesheld", "noofshares", "numberofshares", "units",
+                 "numberofsharesheld", "noofsharesheld",
                  "nominal", "nominalvalue", "parvalue", "position", "contracts",
                  "noofcontracts", "numberofcontracts", "holdingquantity", "qty",
                  "數量", "数量", "持股數", "持股数", "股數", "股数", "張數", "张数", "合約張數",
@@ -429,7 +432,9 @@ def attach_option_table(snapshot, html, multiplier=50.0):
     idx = [o.get("index_price") for o in opts if o.get("index_price")]
     if idx and not snapshot.get("index_level"):
         snapshot["index_level"] = idx[0]      # 官网自己给的指数点位：与持仓同一天，口径一致
-    existing = any((r.get("bucket") or "").startswith("CALL") for r in snapshot.get("rows", []))
+    from ..coverage import classify as _classify
+    # 现场分类判断（不依赖行上缓存的 bucket），否则持股表里已有的期权腿会被重复并入
+    existing = any(_classify(r).startswith("CALL") for r in snapshot.get("rows", []))
     if existing:
         snapshot.setdefault("warnings", []).append(
             "持仓文件里已有期权腿，未重复并入页面期权表（避免双计）")

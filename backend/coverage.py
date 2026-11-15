@@ -63,7 +63,10 @@ _FUT_PAT = re.compile(r"\b(HSI|MHI|HHI|MCH|HTI|MHT)\b.{0,24}?(FUT|FUTURE|期貨|
 _CALL_PAT = re.compile(r"\bC(ALL)?\b|認購|认购|CALL", re.I)
 _PUT_PAT = re.compile(r"\bP(UT)?\b|認沽|认沽|PUT", re.I)
 _OPT_PAT = re.compile(r"OPTION|期權|期权|\bOPT\b", re.I)
-_CASH_PAT = re.compile(r"CASH|現金|现金|MARGIN|保證金|保证金|DEPOSIT|存款|MONEY\s*MARKET|RECEIVABLE|PAYABLE|應收|应收|應付|应付", re.I)
+# 货币基金 ETF 视同现金：英文页写作 "GLOBAL X USD MM ETF"（3137），中文页「美元貨幣市場ETF」
+_CASH_PAT = re.compile(r"CASH|現金|现金|MARGIN|保證金|保证金|DEPOSIT|存款|MONEY\s*MARKET|\bMM\s*ETF\b|"
+                       r"MONEY\s*MKT|貨幣市場|货币市场|"
+                       r"RECEIVABLE|PAYABLE|應收|应收|應付|应付", re.I)
 
 # 月份代码：F=1月 G=2 H=3 J=4 K=5 M=6 N=7 Q=8 U=9 V=10 X=11 Z=12（期货/看涨期权通用月码）
 _MONTH_CODE = {"F": 1, "G": 2, "H": 3, "J": 4, "K": 5, "M": 6,
@@ -98,6 +101,12 @@ def _text_all(row):
     return " ".join(parts)
 
 
+# 彭博期货根代码 → 交易所代码：HIX6=恒指 2026-11，HCX6=国指；与月码、年份个位数连写
+_BBG_FUT_ROOT = re.compile(r"\b(HI|HC|HU|HTI)([FGHJKMNQUVXZ])(\d)\b")
+_BBG_ROOT_MAP = {"HI": "HSI", "HC": "HHI", "HU": "MHI", "HTI": "HTI"}
+_FUT_WORD = re.compile(r"\bFUT(?:URE)?S?\b|期貨|期货", re.I)
+
+
 def detect_index_code(text):
     """识别合约所属指数族（HSI/MHI/HHI/...），决定乘数。
     只要求左词边界：合约代码常与月码连写（MHIX6、HSIX6C26400），右边界会漏判。
@@ -110,11 +119,17 @@ def detect_index_code(text):
     for code, mini_code in (("HSI", "MHI"), ("HHI", "MCH"), ("HTI", "MHT")):
         if re.search(r"\b" + code, up):
             return mini_code if mini else code
+    m = _BBG_FUT_ROOT.search(up)
+    if m:
+        code = _BBG_ROOT_MAP[m.group(1)]
+        return {"HSI": "MHI", "HHI": "MCH"}.get(code, code) if mini else code
     if "恒生科技" in up or "HANG SENG TECH" in up:
         return "MHT" if mini else "HTI"
-    if "國企" in up or "国企" in up or "HSCEI" in up or "H-SHARE" in up:
+    if ("國企" in up or "国企" in up or "HSCEI" in up or "H-SHARE" in up
+            or "HANG SENG CHINA ENT" in up):
         return "MCH" if mini else "HHI"
-    if "恒生指數" in up or "恒生指数" in up or "HANG SENG INDEX" in up:
+    if ("恒生指數" in up or "恒生指数" in up or "HANG SENG INDEX" in up
+            or "HANG SENG IDX" in up or "恒指" in up):
         return "MHI" if mini else "HSI"
     return None
 
@@ -219,8 +234,9 @@ def classify(row):
     if _CASH_PAT.search(up) and not _OPT_PAT.search(up):
         return BUCKET_CASH
 
-    is_fut = bool(_FUT_PAT.search(up)) or (
-        detect_index_code(up) and re.search(r"\bFUT|期貨|期货", up))
+    # 名称/代码里带 FUT/期貨 且能认出指数族，或彭博期货代码（HIX6）——都按指数期货
+    is_fut = bool(_FUT_PAT.search(up)) or bool(_FUT_WORD.search(text) and detect_index_code(text)) \
+        or bool(_BBG_FUT_ROOT.search(str(row.get("ticker") or "").upper()))
     is_opt = bool(_OPT_PAT.search(up)) or bool(
         re.search(r"\b(?:HSI|MHI|HHI|MCH|HTI|MHT)\b.*\b[CP]\s?\d{4,6}\b", up))
 
@@ -303,7 +319,8 @@ def compute_coverage(snapshot, index_level=None, vol_annual=0.20, rate=0.0):
     buckets = {}
 
     for row in rows:
-        bucket = row.get("bucket") or classify(row)
+        # 每次重新分类：存档里的 bucket 是抓取当时规则算的缓存，规则修正后必须以新规则为准
+        bucket = classify(row)
         row["bucket"] = bucket
         buckets[bucket] = buckets.get(bucket, 0) + 1
         mv = row.get("market_value")
@@ -500,17 +517,10 @@ def compute_coverage(snapshot, index_level=None, vol_annual=0.20, rate=0.0):
         ratio = long_index_equiv / nav
         result["long_vs_nav"] = round(ratio, 6)
         if ratio < 0.8:
-            if facts.get("cash_pct") is not None and fut_notional == 0:
-                warnings.append(
-                    "已披露多头仅为资产净值的 %.1f%%：官网持股表不逐项披露恒指期货多头"
-                    "（资产配置显示现金 %.1f%%，期货敞口在其背后），coverage_spot/strike "
-                    "只是相对已披露正股、偏高；以 official_coverage_pct_nav 为准"
-                    % (ratio * 100, facts["cash_pct"] * 100))
-            else:
-                warnings.append(
-                    "多头名义仅为资产净值的 %.1f%%，持仓不完整（如只拿到前十大持股，或期货腿未披露），"
-                    "此时 coverage_spot/strike 会虚高，请以 official_coverage_pct_nav 为准"
-                    % (ratio * 100))
+            warnings.append(
+                "多头名义仅为资产净值的 %.1f%%，持仓不完整（如只拿到前十大持股），或有持仓行"
+                "未被识别为期货（检查 bucket_counts 与 future_legs），此时 coverage_spot/strike 会虚高"
+                % (ratio * 100))
     cs = result.get("coverage_spot")
     if cs is not None and (cs > 1.5 or cs < 0.5):
         warnings.append("覆盖比率 %.1f%% 偏离正常区间（满额备兑应在 100%% 附近），"
