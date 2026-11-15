@@ -415,6 +415,15 @@ def attach_option_table(snapshot, html, multiplier=50.0):
             "页面上没解析到期权持仓表；若 CSV 里也没有期权腿，覆盖比率的分子会缺失")
         return snapshot
     snapshot["option_table"] = opts
+    if not snapshot.get("as_of"):
+        d = as_of_from_option_table(opts)
+        if d:
+            snapshot["as_of"] = d
+            snapshot.setdefault("warnings", []).append(
+                "页面未解析出截至日期，已按期权表 到期日−到期前天数 推定为 %s" % d)
+    idx = [o.get("index_price") for o in opts if o.get("index_price")]
+    if idx and not snapshot.get("index_level"):
+        snapshot["index_level"] = idx[0]      # 官网自己给的指数点位：与持仓同一天，口径一致
     existing = any((r.get("bucket") or "").startswith("CALL") for r in snapshot.get("rows", []))
     if existing:
         snapshot.setdefault("warnings", []).append(
@@ -427,10 +436,39 @@ def attach_option_table(snapshot, html, multiplier=50.0):
         r["bucket"] = classify(r)
     snapshot.setdefault("rows", []).extend(new_rows)
     snapshot["n_rows"] = len(snapshot["rows"])
-    idx = [o.get("index_price") for o in opts if o.get("index_price")]
-    if idx and not snapshot.get("index_level"):
-        snapshot["index_level"] = idx[0]      # 官网自己给的指数点位，最准
     return snapshot
+
+
+def as_of_from_option_table(opts):
+    """期权表的 到期日 − 到期日前的天數 → 持仓日期（官网 10-29 截图：10/30/2026、1 天）"""
+    import datetime
+    for o in opts:
+        exp = _normalize_date(o.get("expiry"))
+        dte = o.get("dte")
+        if exp and dte is not None:
+            return (datetime.date.fromisoformat(exp) - datetime.timedelta(days=int(dte))).isoformat()
+    return None
+
+
+def summarize_tables(html):
+    """页面上每张 <table> 的摘要：前面紧挨的标题文字、表头、行数、前两行、能映射上的字段"""
+    out = []
+    for i, m in enumerate(re.finditer(r"<table[^>]*>(.*?)</table>", html, re.S | re.I)):
+        before = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html[max(0, m.start() - 1500):m.start()]))
+        trs = re.findall(r"<tr[^>]*>(.*?)</tr>", m.group(1), re.S | re.I)
+        grid = [[re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", c)).strip()
+                 for c in re.findall(r"<t[hd][^>]*>(.*?)</t[hd]>", tr, re.S | re.I)] for tr in trs]
+        header = grid[0] if grid else []
+        out.append({
+            "index": i,
+            "heading_before": before[-200:].strip(),
+            "header": header,
+            "n_rows": max(len(grid) - 1, 0),
+            "sample_rows": grid[1:3],
+            "holdings_fields": [map_column(h) for h in header],
+            "option_fields": [map_option_column(h) for h in header],
+        })
+    return out
 
 
 def _normalize_date(s):
@@ -537,6 +575,7 @@ class GlobalXAdapter:
     def discover_holdings_urls(self, code):
         """从基金页里找出可能的持仓数据地址（按可能性排序）"""
         page_url, html = self.fund_page(code)
+        self.last_page_url, self.last_page_html = page_url, html
         found, seen = [], set()
         for m in _URL_PAT.finditer(html):
             u = m.group(1)
@@ -570,11 +609,13 @@ class GlobalXAdapter:
             # 显式给了地址就不必依赖页面发现；页面仍尽量取一份，用于兜底猜 as_of
             try:
                 page_url, html = self.fund_page(code)
+                self.last_page_url, self.last_page_html = page_url, html
             except RuntimeError as e:
                 print("（基金页取不到，仅用显式地址）%s" % e)
         else:
             page_url, html, cands = self.discover_holdings_urls(code)
         tried = []
+        self.last_candidates = list(cands)
         for u in cands:
             try:
                 r = self._get(u)
@@ -623,33 +664,61 @@ def _is_texty(r):
     return "text" in ct or "json" in ct or "csv" in ct
 
 
-_AS_OF_PATS = [
+# 日期写法：官网是 "截至2026年11月12日"；CSV 表头常见 "As of 31/10/2026"、"2026-10-31"
+_DATE_PATS = [
+    r"(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日?",
     r"(20\d{2})[-/\.](\d{1,2})[-/\.](\d{1,2})",
-    r"(\d{1,2})[-/\.](\d{1,2})[-/\.](20\d{2})",
+    r"(\d{1,2})[-/\.](\d{1,2})[-/\.](20\d{2})",          # 日/月/年（不合法时再按月/日/年试）
 ]
+_ASOF_KW = r"(?:as\s*of|as\s*at|截至|截止|數據日期|数据日期|持倉日期|持仓日期)\s*[:：]?\s*"
+# 持股区块的标题：页面上还有业绩、净值等别的"截至"，要优先取持股标题旁边那个
+_HOLDINGS_ANCHORS = ["每日持股", "每日持倉", "每日持仓", "全部持倉", "全部持仓",
+                     "Daily Holdings", "Fund Holdings", "Full Holdings"]
 
 
-def guess_as_of(*texts):
-    """从文件/页面里猜"截至日期"（as of / 截至 / 數據日期 附近的日期）"""
+def _first_date(seg):
     import datetime
-    for text in texts:
-        if not text:
+    for pat in _DATE_PATS:
+        m = re.search(pat, seg)
+        if not m:
             continue
-        window = None
-        m = re.search(r"(as\s*of|as\s*at|截至|數據日期|数据日期|持倉日期|持仓日期)[^0-9]{0,20}"
-                      r"([0-9][0-9\-/\.\s年月日]{6,24})", text, re.I)
-        if m:
-            window = m.group(2)
-        for pat in _AS_OF_PATS:
-            mm = re.search(pat, window or text[:6000])
-            if not mm:
-                continue
-            g = [int(x) for x in mm.groups()]
-            y, mo, d = (g if g[0] > 1000 else [g[2], g[1], g[0]])
+        g = [int(x) for x in m.groups()]
+        cands = [(g[0], g[1], g[2])] if g[0] > 1000 else [(g[2], g[1], g[0]), (g[2], g[0], g[1])]
+        for y, mo, d in cands:
             try:
                 return datetime.date(y, mo, d).isoformat()
             except ValueError:
                 continue
+    return None
+
+
+def guess_as_of(*texts):
+    """从文件/页面里找"截至日期"。顺序：
+    1) 持股标题（每日持股/Daily Holdings…）之后 200 字内的 截至/as of 日期
+    2) 任意 截至/as of 紧跟的日期
+    3) 仅对小文本（CSV 表头等）：开头部分的第一个日期
+    HTML 先去标签，"截至</span><span>2026年…" 这种被拆开的写法也能认。
+    """
+    for text in texts:
+        if not text:
+            continue
+        plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text))
+        for a in _HOLDINGS_ANCHORS:
+            for am in re.finditer(re.escape(a), plain, re.I):
+                seg = plain[am.end(): am.end() + 200]
+                km = re.search(_ASOF_KW, seg, re.I)
+                if km:
+                    d = _first_date(seg[km.end(): km.end() + 40])
+                    if d:
+                        return d
+        for km in re.finditer(_ASOF_KW, plain, re.I):
+            d = _first_date(plain[km.end(): km.end() + 40])
+            if d:
+                return d
+        if len(plain) < 20000:
+            d = _first_date(plain[:3000])
+            if d:
+                return d
     return None
 
 
