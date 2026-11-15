@@ -128,7 +128,9 @@ try {
     Invoke-WithTimeout "deploy\local\opend_selftest.py" @()
   } else {
     Write-Log "运行同步脚本"
-    Invoke-WithTimeout "deploy\local\sync_hsi.py" @("--upload")
+    # --missing：除当月外，先用 OpenD 尝试补采最近几个月的空洞（拿得到就有完整明细）；
+    # 补不到的（合约历史已超出富途窗口）由下面的港交所费率表导入兜底
+    Invoke-WithTimeout "deploy\local\sync_hsi.py" @("--missing", "--upload")
     Write-Log "同步港交所费率表（有新月份则补入，临时值升级为港交所口径）"
     Invoke-WithTimeout "deploy\local\import_hsi_csv.py" @("--upload")
     Sync-PendingDataCommits
