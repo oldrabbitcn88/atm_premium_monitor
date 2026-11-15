@@ -383,7 +383,7 @@ class TestCompletenessGuard(unittest.TestCase):
         attach_option_table(snap, REAL_OPTION_HTML)
         r = compute_coverage(snap)
         self.assertLess(r["long_vs_nav"], 0.4)               # 前十大仅约 33% NAV
-        self.assertTrue(any("持仓多半不完整" in w for w in r["warnings"]))
+        self.assertTrue(any("持仓不完整" in w for w in r["warnings"]))
         self.assertTrue(any("偏离正常区间" in w for w in r["warnings"]))
         # 官方口径不受分母不完整影响，仍然可信
         self.assertAlmostEqual(r["official_coverage_pct_nav"], 0.9735, places=6)
@@ -430,7 +430,7 @@ class TestRealPageRegressions(unittest.TestCase):
         self.assertEqual(r["wavg_dte"], 1.0)                           # as_of 正确时为 +1，不再是 -2
         # 页面持股表没有期货/2800：多头名义仅约 71% NAV，必须告警
         self.assertAlmostEqual(r["long_vs_nav"], 0.709, delta=0.005)
-        self.assertTrue(any("持仓多半不完整" in w for w in r["warnings"]))
+        self.assertTrue(any("持仓不完整" in w for w in r["warnings"]))
 
     def test_negative_dte_warns(self):
         snap = {"as_of": "2026-11-15", "rows": [
@@ -478,3 +478,33 @@ class TestFetchCli(unittest.TestCase):
     def test_missing_as_of_refuses_to_archive(self):
         with self.assertRaises(SystemExit):
             self._run(self._snap(as_of=None))
+
+
+class TestFundFacts(unittest.TestCase):
+    """官网「期權詳情」键值表与资产配置表（结构照 2026-11-12 实抓页面）"""
+
+    HTML = ("<table><tr><th>總資產淨值(以港元計算)</th><th>HKD 3,178,362,136.84</th></tr>"
+            "<tr><td>恒生指數收市價</td><td>24,008.55</td></tr></table>"
+            "<table><tr><th>&nbsp;</th><th>&nbsp;</th><th>比率 (%)</th></tr>"
+            "<tr><td></td><td>現金</td><td>32.0</td></tr>"
+            "<tr><td></td><td>金融</td><td>30.1</td></tr></table>")
+
+    def test_parse(self):
+        from backend.data.globalx_adapter import parse_fund_facts
+        f = parse_fund_facts(self.HTML)
+        self.assertAlmostEqual(f["nav_total"], 3178362136.84, places=2)
+        self.assertAlmostEqual(f["index_close"], 24008.55, places=2)
+        self.assertAlmostEqual(f["cash_pct"], 0.32, places=6)
+
+    def test_precise_index_close_preferred_and_futures_warning(self):
+        import json as _json
+        from backend.data.globalx_adapter import attach_option_table
+        snap = _json.load(open(REAL_PAGE, encoding="utf-8"))
+        snap.pop("option_table")
+        opt_html = REAL_OPTION_HTML.replace("22,959", "24,009")
+        attach_option_table(snap, self.HTML + opt_html)
+        self.assertEqual(snap["index_level"], 24008.55)       # 精确收市价，而非期权表的 24,009
+        r = compute_coverage(snap)
+        self.assertAlmostEqual(r["nav_total"], 3178362136.84, places=2)
+        self.assertAlmostEqual(r["long_vs_nav"], 0.7095, delta=0.001)
+        self.assertTrue(any("不逐项披露恒指期货" in w for w in r["warnings"]))

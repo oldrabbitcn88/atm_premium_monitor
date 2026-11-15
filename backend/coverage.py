@@ -489,15 +489,28 @@ def compute_coverage(snapshot, index_level=None, vol_annual=0.20, rate=0.0):
         if result[k] is not None:
             result[k] = round(result[k], 6)
 
-    # 完整性自检：持仓文件只抓到前十大、或漏了期货/ETF 腿时，分母会明显偏小
-    if nav_implied and long_index_equiv:
-        ratio = long_index_equiv / nav_implied
+    # 完整性自检：分母（已披露的多头）明显小于 NAV 时，相对正股的覆盖比率会虚高
+    facts = snapshot.get("fund_facts") or {}
+    nav = facts.get("nav_total") or nav_implied
+    if facts.get("nav_total"):
+        result["nav_total"] = facts["nav_total"]
+    if facts.get("cash_pct") is not None:
+        result["cash_pct_nav"] = facts["cash_pct"]
+    if nav and long_index_equiv:
+        ratio = long_index_equiv / nav
         result["long_vs_nav"] = round(ratio, 6)
         if ratio < 0.8:
-            warnings.append(
-                "多头名义仅为资产净值的 %.1f%%，持仓多半不完整（例如只拿到前十大持股），"
-                "此时 coverage_spot/strike 会虚高，请以 official_coverage_pct_nav 为准"
-                % (ratio * 100))
+            if facts.get("cash_pct") is not None and fut_notional == 0:
+                warnings.append(
+                    "已披露多头仅为资产净值的 %.1f%%：官网持股表不逐项披露恒指期货多头"
+                    "（资产配置显示现金 %.1f%%，期货敞口在其背后），coverage_spot/strike "
+                    "只是相对已披露正股、偏高；以 official_coverage_pct_nav 为准"
+                    % (ratio * 100, facts["cash_pct"] * 100))
+            else:
+                warnings.append(
+                    "多头名义仅为资产净值的 %.1f%%，持仓不完整（如只拿到前十大持股，或期货腿未披露），"
+                    "此时 coverage_spot/strike 会虚高，请以 official_coverage_pct_nav 为准"
+                    % (ratio * 100))
     cs = result.get("coverage_spot")
     if cs is not None and (cs > 1.5 or cs < 0.5):
         warnings.append("覆盖比率 %.1f%% 偏离正常区间（满额备兑应在 100%% 附近），"
