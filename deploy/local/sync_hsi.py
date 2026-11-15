@@ -13,7 +13,7 @@
 
 补采时效：补采 M 月要用 M+1 月到期的期权合约在 M 月交割日的日K。
 富途对已退市合约的历史保留有限（约 1 个月，以实际返回为准，可能更短甚至取不到）；
-补不到就由 import_hsi_csv.py 从港交所费率表补入（run_hsi_job 每次运行后都会自动执行）。
+补不到就由 hsi_official.py 按港交所日报官方结算价补入（run_hsi_job 每次运行后都会自动执行，日报保留约 11 个月）。
 """
 import datetime
 import json
@@ -95,7 +95,7 @@ def plan_months(hist, today, months=None, missing=False, force=False,
             note = "补采交割日日K"
             if late > FUTU_HISTORY_DAYS:
                 hint = (f"（所需合约已于 {contract_exp} 到期 {late} 天，"
-                        "很可能超出富途历史窗口，请改用 import_hsi_csv.py 补费率）")
+                        "很可能超出富途历史窗口，将由港交所日报官方结算价补入）")
                 if missing and not months:
                     # 自动补缺模式下不再徒劳重试，否则每天的计划任务都会报失败
                     plan.append((ym, exp_day, "skip", "超出富途历史窗口" + hint))
@@ -103,7 +103,7 @@ def plan_months(hist, today, months=None, missing=False, force=False,
                 note += hint
             elif late > 0:
                 note += (f"（所需合约已于 {contract_exp} 到期 {late} 天，富途可能已不保留其历史；"
-                         "补不到则由港交所费率表兜底）")
+                         "补不到则由港交所日报官方结算价兜底）")
             plan.append((ym, exp_day, "backfill", note))
     return plan
 
@@ -162,10 +162,9 @@ def collect_backfill(futu, exp_day):
 
 def build_record(day, hsi_price, strike, opt_price, expiry):
     py = premium_yield(opt_price, hsi_price)
-    # 口径：主序列一律以港交所费率表为准（259 期历史都是这个口径）。
-    # OpenD 的 last 价系统性高出港交所约 20%（港交所用的应是卖方可成交价），
-    # 直接拿它写 premium_yield 会让序列出现结构性断层、历史均值对比失真。
-    # 故此处只记为临时值，等港交所发布当月费率后由 import_hsi_csv.py 覆盖。
+    # 口径：权威值 = 港交所恒指期权日报的 O.Q.P.（官方结算价），当晚才发布。
+    # OpenD 拿到的价格与之一致或极接近（实测 2026-06/07/08 分毫不差），先记为临时值，
+    # 由 hsi_official.py 用官方结算价覆盖，OpenD 价格留在 option_price_market 存档。
     return {
         "ts": day.strftime("%Y-%m-%d"),
         "underlying": hsi_price, "strike": strike,
@@ -223,7 +222,7 @@ def main(argv=None):
         if f"{py_:04d}-{pm_:02d}" not in have:
             print(f"[sync_hsi] ⚠ 上月 {py_:04d}-{pm_:02d} 缺数据（交割日 "
                   f"{monthly_expiry_of(py_, pm_)} 未采到）。可加 --missing 先试 OpenD 补采；"
-                  "补不到则更新港交所费率表 CSV，run_hsi_job 会自动用 import_hsi_csv 补入")
+                  "补不到则由 run_hsi_job 随后调用的 hsi_official 按港交所日报补入")
 
     plan = plan_months(hist, today, months=args.month or None,
                        missing=args.missing, force=args.force)
@@ -265,7 +264,7 @@ def main(argv=None):
 
     if failed:
         print(f"[sync_hsi] 失败月份：{', '.join(failed)}。若已超出富途历史窗口，"
-              "请用 import_hsi_csv.py 从港交所费率表补 PY。")
+              "将由 hsi_official.py 按港交所日报官方结算价补入。")
     if not written:
         if failed:
             sys.exit(2)       # 让计划任务/日志能看出这次是失败而不是"无事可做"

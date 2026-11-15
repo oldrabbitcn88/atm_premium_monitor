@@ -70,7 +70,7 @@
     口径说明：ATM Premium Yield = 每月交割日卖出下月平值看涨期权（ATM Call）收取的权利金 ÷ 当日标的收盘价（单月口径，参考港交所恒生指数备兑期权指数 HSICC 编制方法）。
     行权价按各交易所合约规则动态取整（恒指20000点以上200点间距；中金所IO 50/100点；上交所ETF期权0.05~0.5元按现货区间）。<br>
     本面板为纯静态：数据文件 data.json（沪深300/中证500，GitHub Actions 每交易日 15:40 生成）与 hsi.json（恒生指数，本机 OpenD 每交易日 16:30 同步）存放于腾讯云 COS，本页托管于云开发静态网站，无后端服务器。
-    恒指 Premium Yield 以港交所恒生指数备兑期权指数（HSICC）费率表为准。<br>
+    恒指权利金取港交所恒指期权日报的官方结算价（O.Q.P.）。<br>
     所载数据仅供参考，不构成投资建议。
   </div>
 </div>
@@ -99,7 +99,7 @@ function fmtPy(x) {
   var t = fmtPct(x.premium_yield);
   if (x.premium_yield_provisional) {
     return t + '<sup style="color:#c47f17" title="临时值：取自 OpenD 市场快照，'
-             + '待港交所费率表发布后覆盖为权威口径">临</sup>';
+             + '待港交所日报官方结算价发布后自动覆盖">临</sup>';
   }
   return t;
 }

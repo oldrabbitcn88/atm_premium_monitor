@@ -26,6 +26,7 @@ def _load(name, rel):
 
 bd = _load("build_data", "deploy/actions/build_data.py")
 sh = _load("sync_hsi", "deploy/local/sync_hsi.py")
+ho = _load("hsi_official", "deploy/local/hsi_official.py")
 
 CN = dt.timezone(dt.timedelta(hours=8))
 
@@ -128,7 +129,7 @@ class TestHsiPlan(unittest.TestCase):
         auto = {ym: (a, n) for ym, _e, a, n in
                 sh.plan_months(hist, dt.date(2026, 12, 15), missing=True)}
         self.assertEqual(auto["2026-09"][0], "skip")   # 所需合约 10-29 到期已 47 天
-        self.assertIn("import_hsi_csv.py", auto["2026-09"][1])
+        self.assertIn("港交所日报", auto["2026-09"][1])
         explicit = sh.plan_months(hist, dt.date(2026, 12, 15), months=["2026-09"])
         self.assertEqual(explicit[0][2], "backfill")
 
@@ -145,9 +146,9 @@ class TestHsiPlan(unittest.TestCase):
         plan = sh.plan_months(self.HIST, dt.date(2026, 11, 27))
         self.assertEqual(plan[0][2], "realtime")
 
-    def test_too_late_points_to_hkex_csv(self):
+    def test_too_late_points_to_hkex_report(self):
         plan = sh.plan_months(self.HIST, dt.date(2027, 3, 1), months=["2026-09"])
-        self.assertIn("import_hsi_csv.py", plan[0][3])
+        self.assertIn("港交所日报", plan[0][3])
 
     def test_parse_args(self):
         a = sh.parse_args(["--month", "2026-09", "--month", "2026-10", "--upload"])
@@ -155,6 +156,36 @@ class TestHsiPlan(unittest.TestCase):
         self.assertTrue(a.upload)
         with self.assertRaises(SystemExit):
             sh.parse_args(["--month", "2026/09"])
+
+
+class HsiOfficialTest(unittest.TestCase):
+    """恒指以港交所日报 O.Q.P. 为准：解析与交割日推算（不联网）"""
+
+    # 节选自 2026-10-29 港交所恒指期权日报：| 后第二段为日间时段，第 4 列是 O.Q.P.
+    DMR = "\n".join([
+        "NOV-26  22800 C      620     640     610     630      12  |     600     660     560     580      -60   16         90  |   1 2 3 4 5",
+        "NOV-26  23000 C      500     511     500     505      10  |     490     535     425     449      -58   16         57  |      2029       425         67       723       +24",
+        "NOV-26  23000 P      300     310     290     300       5  |     320     340     300     335       40   17         20  |   1 2 3 4 5",
+        "DEC-26  23000 C      700     720     690     710       3  |     690     730     650     680      -40   17         11  |   1 2 3 4 5",
+    ])
+
+    def test_settle_price_picks_month_strike_and_call(self):
+        self.assertEqual(ho.settle_price(self.DMR, 2026, 11, 23000), (449.0, "16"))
+        self.assertEqual(ho.settle_price(self.DMR, 2026, 12, 23000), (680.0, "17"))
+        self.assertIsNone(ho.settle_price(self.DMR, 2026, 11, 23200))
+
+    def test_expiry_is_second_last_trading_day(self):
+        closes = {dt.date(2026, 10, d): 1.0 for d in (26, 27, 28, 29, 30)}
+        self.assertEqual(ho.expiry_day(2026, 10, closes, today=dt.date(2026, 11, 15)), dt.date(2026, 10, 29))
+
+    def test_expiry_respects_month_end_holiday(self):
+        # 月末最后一个工作日休市（日线里没有）→ 交割日前移一天
+        closes = {dt.date(2024, 3, d): 1.0 for d in (25, 26, 27, 28)}   # 3/29 耶稣受难节
+        self.assertEqual(ho.expiry_day(2024, 3, closes, today=dt.date(2024, 4, 10)), dt.date(2024, 3, 27))
+
+    def test_expiry_pads_future_weekdays_in_current_month(self):
+        closes = {dt.date(2026, 11, d): 1.0 for d in (12, 13)}           # 月中，之后尚未发生
+        self.assertEqual(ho.expiry_day(2026, 11, closes, today=dt.date(2026, 11, 15)), dt.date(2026, 11, 27))
 
 
 if __name__ == "__main__":

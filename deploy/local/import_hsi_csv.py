@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""从港交所月度费率 CSV 补齐 hsi.json 中缺失的月份（兜底路径）
+"""【手工工具，作业已不再调用】从月度费率 CSV 补齐 hsi.json 中缺失的月份
+
+日常权威来源已改为港交所日报官方结算价（hsi_official.py）。本脚本只用于补
+超出港交所日报保留期（约 11 个月）的月份；不会改动已是官方口径（source=hkex_oqp）的记录。
+
 
 用途：交割日当天机器没开、OpenD 没抓到时，等港交所更新费率表后用它补上。
 注意：CSV 只有 PremiumYield 一列，**没有**收盘点位/行权价/权利金明细，
@@ -121,7 +125,7 @@ def main():
         if rec is not None:
             # 已有记录：只有当它是 sync_hsi 写的临时值时才升级为港交所权威值。
             # 明细（标的/行权价/合约）保留 OpenD 抓到的，那部分港交所 CSV 没有。
-            if rec.get("premium_yield_provisional"):
+            if rec.get("premium_yield_provisional") and rec.get("source") != "hkex_oqp":
                 rec["premium_yield"] = round(py, 6)
                 rec.pop("premium_yield_provisional", None)
                 if rec.get("underlying"):
