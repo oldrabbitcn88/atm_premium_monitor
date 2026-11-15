@@ -419,19 +419,40 @@ class TestRealPageRegressions(unittest.TestCase):
         self.assertEqual(snap["index_level"], 22959.0)
 
     def test_real_page_snapshot(self):
+        """与独立仓库 oldrabbitcn88/3419-covered-call-monitor 的 2026-11-12 结果逐项对账"""
         import json as _json
         snap = _json.load(open(REAL_PAGE, encoding="utf-8"))
-        snap["index_level"] = snap["option_table"][0]["index_price"]
+        snap["index_level"] = 24008.55                                 # 期權詳情：恒生指數收市價
         r = compute_coverage(snap)
-        self.assertEqual(r["bucket_counts"].get("EQUITY"), 97)
-        self.assertEqual(r["short_call_contracts"], 2674)              # 与官网名义敞口反算一致
-        self.assertAlmostEqual(abs(snap["option_table"][0]["notional"])
-                               / (snap["option_table"][0]["index_price"] * 50), 2674, delta=0.5)
+        self.assertEqual(r["bucket_counts"], {"EQUITY": 95, "FUTURE_LONG": 1, "CASH": 1, "CALL_SHORT": 1})
+        self.assertAlmostEqual(r["equity_mv"], 2154831706.83, places=2)      # 不含 3137 货币基金
+        self.assertAlmostEqual(r["futures_notional"], 1073284000.0, places=2)  # 895 张 × 23,984 × 50
+        self.assertAlmostEqual(r["short_call_spot_notional"], 3209943135.0, places=0)
+        self.assertAlmostEqual(r["coverage_spot"], 0.994371, places=6)       # 对方仓库 99.4371%
+        self.assertEqual(r["short_call_contracts"], 2674)
         self.assertAlmostEqual(r["official_coverage_pct_nav"], 1.0099, places=4)
-        self.assertEqual(r["wavg_dte"], 1.0)                           # as_of 正确时为 +1，不再是 -2
-        # 页面持股表没有期货/2800：多头名义仅约 71% NAV，必须告警
-        self.assertAlmostEqual(r["long_vs_nav"], 0.709, delta=0.005)
-        self.assertTrue(any("持仓不完整" in w for w in r["warnings"]))
+        self.assertEqual(r["wavg_dte"], 1.0)
+        self.assertFalse(any("持仓不完整" in w for w in r["warnings"]))
+
+    def test_stale_bucket_in_archive_is_ignored(self):
+        """旧存档里期货行被错记成 EQUITY：重算时必须按新规则重新分类"""
+        import json as _json
+        snap = _json.load(open(REAL_PAGE, encoding="utf-8"))
+        for row in snap["rows"]:
+            row["bucket"] = "EQUITY"
+        r = compute_coverage(snap, index_level=24008.55)
+        self.assertAlmostEqual(r["futures_notional"], 1073284000.0, places=2)
+
+    def test_bloomberg_futures_codes_and_money_market(self):
+        from backend.coverage import BUCKET_FUT_LONG, BUCKET_CASH
+        self.assertEqual(classify({"name": "HANG SENG IDX FUT 11/27/26", "ticker": "HIX6",
+                                   "quantity": 895, "price": 23984.0}), BUCKET_FUT_LONG)
+        self.assertEqual(multiplier_for("HANG SENG IDX FUT 11/27/26 HIX6"), 50.0)
+        self.assertEqual(multiplier_for("HSCEI FUT HCX6"), 50.0)
+        self.assertEqual(classify({"name": "Global X 美元貨幣市場ETF", "ticker": "3137 HK",
+                                   "market_value": 1.0}), BUCKET_CASH)
+        self.assertEqual(classify({"name": "領展房地產投資信託基金", "ticker": "823 HK",
+                                   "market_value": 1.0}), BUCKET_EQUITY)
 
     def test_negative_dte_warns(self):
         snap = {"as_of": "2026-11-15", "rows": [
@@ -499,7 +520,7 @@ class TestFundFacts(unittest.TestCase):
         self.assertAlmostEqual(f["index_close"], 24008.55, places=2)
         self.assertAlmostEqual(f["cash_pct"], 0.32, places=6)
 
-    def test_precise_index_close_preferred_and_futures_warning(self):
+    def test_precise_index_close_preferred(self):
         import json as _json
         from backend.data.globalx_adapter import attach_option_table
         snap = _json.load(open(REAL_PAGE, encoding="utf-8"))
@@ -509,5 +530,28 @@ class TestFundFacts(unittest.TestCase):
         self.assertEqual(snap["index_level"], 24008.55)       # 精确收市价，而非期权表的 24,009
         r = compute_coverage(snap)
         self.assertAlmostEqual(r["nav_total"], 3178362136.84, places=2)
-        self.assertAlmostEqual(r["long_vs_nav"], 0.7095, delta=0.001)
-        self.assertTrue(any("不逐项披露恒指期货" in w for w in r["warnings"]))
+        self.assertAlmostEqual(r["long_vs_nav"], 3228115706.83 / 3178362136.84, places=6)
+        self.assertAlmostEqual(r["coverage_spot"], 0.994371, places=6)
+
+
+class TestEnglishPageFormat(unittest.TestCase):
+    """英文版页面/CSV（3419-covered-call-monitor 仓库所存格式，2026-11-12 摘录）"""
+
+    CSV = ("﻿Name of Securities,Exchange Ticker,Exchange,Market Price (in HKD),"
+           "Number of Shares Held,Market Value (in HKD),Net Assets (%)\n"
+           'TENCENT HOLDINGS,700 HK,Hong Kong,398.8,"411,640","164,162,032.00",5.16\n'
+           'GLOBAL X USD MM ETF,3137 HK,Hong Kong,1145,"48,000","54,960,000.00",1.73\n'
+           'HANG SENG IDX FUT 11/27/26,HIX6,Hong Kong,23984,895,"44,758,650.00",1.41\n'
+           'CALL HSI WEEKLY OPTIONS 11/13/26 24800,,,1,"-2,674","-133,700.00",0.00\n')
+
+    def test_parse_and_classify(self):
+        from backend.data.globalx_adapter import parse_csv_text
+        rows = parse_csv_text(self.CSV)
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(rows[0]["ticker"], "700 HK")
+        self.assertEqual(rows[0]["quantity"], 411640.0)
+        r = compute_coverage({"as_of": "2026-11-12", "rows": rows}, index_level=24008.55)
+        self.assertEqual(r["bucket_counts"], {"EQUITY": 1, "CASH": 1, "FUTURE_LONG": 1, "CALL_SHORT": 1})
+        self.assertAlmostEqual(r["equity_mv"], 164162032.0, places=2)
+        self.assertAlmostEqual(r["futures_notional"], 895 * 23984 * 50, places=2)
+        self.assertAlmostEqual(r["cash_mv"], 54960000.0, places=2)
