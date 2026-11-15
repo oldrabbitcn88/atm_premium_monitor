@@ -114,7 +114,7 @@ def parse_number(v):
     pct = s.endswith("%") or s.endswith("％")
     s = s.strip("()").replace(",", "").replace("%", "").replace("％", "")
     # 币种前缀：HKD$ / HK$ / USD / RMB¥ / $ …（官网名義敞口列写作 "HKD$-3,076,459,100.00"）
-    s = re.sub(r"^\s*[A-Za-z]{0,4}\s*[$¥€£￥]?\s*", "", s)
+    s = re.sub(r"^\s*(?:港元|港幣|港币|人民幣|人民币|美元|[A-Za-z]{0,4})\s*[$¥€£￥]?\s*", "", s)
     s = s.replace("港元", "").replace("元", "").strip()
     try:
         x = float(s)
@@ -460,6 +460,7 @@ def parse_fund_facts(html):
     实测（2026-11-12）：總資產淨值(以港元計算) HKD 3,178,362,136.84；恒生指數收市價 24,008.55；
     资产配置 現金 32.0%——恒指期货多头不逐项披露，就在这部分现金背后。"""
     facts = {}
+    navs = []     # [(是否全基金口径, 值)]：「交易資料」里是上市类别，「期權詳情」里是全基金
     for tbl in re.findall(r"<table[^>]*>(.*?)</table>", html, re.S | re.I):
         for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", tbl, re.S | re.I):
             cells = [re.sub(r"\s+", "", re.sub(r"<[^>]+>", " ", c)).replace("&nbsp;", "")
@@ -469,13 +470,20 @@ def parse_fund_facts(html):
                 continue
             k, v = cells
             if "總資產淨值" in k or "总资产净值" in k or k.lower().startswith("totalnav"):
-                facts.setdefault("nav_total", parse_number(v))
+                x = parse_number(v)
+                if x is not None:
+                    navs.append((("以港元計算" in k) or ("以港元计算" in k), x))
             elif "恒生指數收市價" in k or "恒生指数收市价" in k:
-                facts.setdefault("index_close", parse_number(v))
+                x = parse_number(v)
+                if x is not None:
+                    facts.setdefault("index_close", x)
             elif k in ("現金", "现金", "Cash"):
                 x = parse_number(v)
                 if x is not None:
                     facts.setdefault("cash_pct", x / 100.0)
+    if navs:
+        # 官方覆盖率的分母是全基金 NAV（「期權詳情」的 總資產淨值(以港元計算)）
+        facts["nav_total"] = sorted(navs, key=lambda t: not t[0])[0][1]
     return {k: v for k, v in facts.items() if v is not None}
 
 
