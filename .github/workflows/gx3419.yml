@@ -41,12 +41,22 @@ jobs:
           [ -z "$HSI" ] && HSI=auto
           # 官网若改版/反爬导致抓取失败，不让整条 workflow 红——
           # 失败明细进日志，数据缺口由下一次或人工 local 补。
-          python -m backend.tools.gx_coverage --hsi "$HSI" fetch 2>&1 | tee /tmp/gx.log || {
+          python -m backend.tools.gx_coverage --hsi "$HSI" --debug-dir deploy/data/gx3419/_debug fetch 2>&1 | tee /tmp/gx.log || {
             echo "::warning::3419 持仓抓取失败，见日志；可手工下载后用 local 子命令补档"
             echo "ok=false" >> "$GITHUB_OUTPUT"
             exit 0
           }
           echo "ok=true" >> "$GITHUB_OUTPUT"
+
+      # 原始页面/表格摘要/下载链接，排查解析问题用；不入库（见 .gitignore），保留 7 天
+      - name: 上传诊断
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gx3419-debug-${{ github.run_id }}
+          path: deploy/data/gx3419/_debug
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: 回写仓库
         if: steps.run.outputs.ok == 'true'

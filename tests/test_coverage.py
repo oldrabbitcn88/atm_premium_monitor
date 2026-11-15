@@ -387,3 +387,94 @@ class TestCompletenessGuard(unittest.TestCase):
         self.assertTrue(any("偏离正常区间" in w for w in r["warnings"]))
         # 官方口径不受分母不完整影响，仍然可信
         self.assertAlmostEqual(r["official_coverage_pct_nav"], 0.9735, places=6)
+
+
+# ---------- 2026-11-15 首次在 GitHub Actions 上实抓官网后暴露的问题 ----------
+
+REAL_PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "fixtures", "real_page_3419_20261112.json")
+
+
+class TestRealPageRegressions(unittest.TestCase):
+    def test_as_of_chinese_date_near_holdings_heading(self):
+        """官网写法是「截至2026年11月12日」；页面上别处的「截至」（业绩等）不能抢先"""
+        from backend.data.globalx_adapter import guess_as_of
+        html = ("<div>累積表現 截至2026年10月31日</div>"
+                "<h2>每日持股</h2><span class='d'>截至</span><span>2026年11月12日</span>")
+        self.assertEqual(guess_as_of(html), "2026-11-12")
+        self.assertEqual(guess_as_of("<p>截至2026年11月12日</p>"), "2026-11-12")
+
+    def test_as_of_from_option_table(self):
+        from backend.data.globalx_adapter import as_of_from_option_table
+        self.assertEqual(as_of_from_option_table([{"expiry": "11/13/2026", "dte": 1.0}]), "2026-11-12")
+        self.assertEqual(as_of_from_option_table([{"expiry": "10/30/2026", "dte": 1}]), "2026-10-29")
+
+    def test_attach_fills_missing_as_of_and_official_index(self):
+        from backend.data.globalx_adapter import attach_option_table
+        html = REAL_OPTION_HTML
+        snap = {"as_of": None, "rows": [{"name": "騰訊", "ticker": "700 HK", "market_value": 1.0}]}
+        attach_option_table(snap, html)
+        self.assertEqual(snap["as_of"], "2026-10-29")
+        self.assertEqual(snap["index_level"], 22959.0)
+
+    def test_real_page_snapshot(self):
+        import json as _json
+        snap = _json.load(open(REAL_PAGE, encoding="utf-8"))
+        snap["index_level"] = snap["option_table"][0]["index_price"]
+        r = compute_coverage(snap)
+        self.assertEqual(r["bucket_counts"].get("EQUITY"), 97)
+        self.assertEqual(r["short_call_contracts"], 2674)              # 与官网名义敞口反算一致
+        self.assertAlmostEqual(abs(snap["option_table"][0]["notional"])
+                               / (snap["option_table"][0]["index_price"] * 50), 2674, delta=0.5)
+        self.assertAlmostEqual(r["official_coverage_pct_nav"], 1.0099, places=4)
+        self.assertEqual(r["wavg_dte"], 1.0)                           # as_of 正确时为 +1，不再是 -2
+        # 页面持股表没有期货/2800：多头名义仅约 71% NAV，必须告警
+        self.assertAlmostEqual(r["long_vs_nav"], 0.709, delta=0.005)
+        self.assertTrue(any("持仓多半不完整" in w for w in r["warnings"]))
+
+    def test_negative_dte_warns(self):
+        snap = {"as_of": "2026-11-15", "rows": [
+            {"name": "TENCENT", "ticker": "700", "market_value": 1e6},
+            {"name": "CALL HSI WEEKLY OPTIONS 11/13/26 24800", "quantity": -1}]}
+        r = compute_coverage(snap, index_level=24000)
+        self.assertTrue(any("as_of 很可能记错" in w for w in r["warnings"]))
+
+
+class TestFetchCli(unittest.TestCase):
+    """fetch 子命令：--hsi auto 不覆盖官网点位；缺 as_of 拒绝存档"""
+
+    def _run(self, snap, argv_extra=()):
+        import tempfile, json as _json
+        from unittest import mock
+        from backend.tools import gx_coverage as cli
+        d = tempfile.mkdtemp()
+        fake = mock.Mock()
+        fake.return_value.fetch_holdings.return_value = snap
+        with mock.patch.object(cli.gx, "GlobalXAdapter", fake), \
+             mock.patch.object(cli, "fetch_index_close", return_value=23637.6) as fic:
+            cli.main(["--data-dir", d, "--hsi", "auto", *argv_extra, "fetch"])
+        raw = os.path.join(d, "raw")
+        files = os.listdir(raw) if os.path.isdir(raw) else []
+        return files, (_json.load(open(os.path.join(raw, files[0]))) if files else None), fic
+
+    def _snap(self, **kw):
+        base = {"fund": "3419.HK", "as_of": "2026-11-12", "index_level": 24009.0, "n_rows": 1,
+                "source_url": "https://www.globalxetfs.com.hk/zh-hant/funds/covered-call-etf/",
+                "rows": [{"name": "騰訊", "ticker": "700 HK", "market_value": 1.0}]}
+        base.update(kw)
+        return base
+
+    def test_auto_does_not_override_official_index(self):
+        files, saved, fic = self._run(self._snap())
+        self.assertEqual(files, ["2026-11-12.json"])
+        self.assertEqual(saved["index_level"], 24009.0)
+        fic.assert_not_called()
+
+    def test_auto_fills_when_page_has_no_index(self):
+        _f, saved, fic = self._run(self._snap(index_level=None))
+        self.assertEqual(saved["index_level"], 23637.6)
+        fic.assert_called_once()
+
+    def test_missing_as_of_refuses_to_archive(self):
+        with self.assertRaises(SystemExit):
+            self._run(self._snap(as_of=None))

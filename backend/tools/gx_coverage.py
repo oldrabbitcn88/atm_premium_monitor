@@ -60,10 +60,9 @@ def save_snapshot(snapshot, data_dir, overwrite=False):
     """按 as_of 落盘；缺 as_of 时退化用抓取日期（并告警）"""
     as_of = snapshot.get("as_of")
     if not as_of:
-        as_of = (snapshot.get("fetched_at") or "")[:10] or datetime.date.today().isoformat()
-        snapshot["as_of"] = as_of
-        snapshot.setdefault("warnings", []).append(
-            "持仓文件未能解析出截至日期，已用抓取日期代替，请人工核对")
+        # 不再用抓取日期顶替：周末/盘前抓到的是前一交易日的持仓，顶替会记错日期
+        raise SystemExit("未能确定持仓的截至日期，拒绝存档（避免记错日期）。"
+                         "可用 local 子命令配合 --as-of 手工指定。")
     os.makedirs(raw_dir(data_dir), exist_ok=True)
     path = os.path.join(raw_dir(data_dir), "%s.json" % as_of)
     if os.path.exists(path) and not overwrite:
@@ -337,6 +336,55 @@ def monthly_urls(start="2024-03", end=None, check=False):
     return out
 
 
+# ---------- 诊断输出（不入库，由 workflow 作为 artifact 上传） ----------
+
+_LINK_HINT = re.compile(r"csv|xlsx|xls|holding|full|download|portfolio|持股|持倉", re.I)
+
+
+def dump_debug(ad, out_dir, max_scripts=15):
+    """保存原始页面、所有表格摘要、疑似下载链接，以及同站 JS 里与持仓下载相关的片段。
+    只用于排查解析问题；任何一步失败都不影响主流程。"""
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+        html = getattr(ad, "last_page_html", "") or ""
+        page_url = getattr(ad, "last_page_url", "") or ""
+        with open(os.path.join(out_dir, "page.html"), "w", encoding="utf-8") as f:
+            f.write(html)
+        with open(os.path.join(out_dir, "tables.json"), "w", encoding="utf-8") as f:
+            json.dump(gx.summarize_tables(html), f, ensure_ascii=False, indent=1)
+        urls = sorted({m.group(1) for m in gx._URL_PAT.finditer(html)})
+        scripts = re.findall(r"<script[^>]+src=[\"']([^\"']+)", html, re.I)
+        with open(os.path.join(out_dir, "links.json"), "w", encoding="utf-8") as f:
+            json.dump({"page_url": page_url,
+                       "candidates_tried": getattr(ad, "last_candidates", []),
+                       "hint_urls": [u for u in urls if _LINK_HINT.search(u)],
+                       "scripts": scripts,
+                       "full_holdings_in_html": [html[max(0, m.start() - 200): m.end() + 200]
+                                                 for m in re.finditer(r"full_holdings", html)][:10]},
+                      f, ensure_ascii=False, indent=1)
+        hits = {}
+        pat = re.compile(r"full_holdings|holdings[^\"'\s]{0,40}\.csv|\.csv[\"'?]", re.I)
+        for src in scripts[:max_scripts]:
+            u = src if src.startswith("http") else (
+                "https:" + src if src.startswith("//") else gx.SITE + "/" + src.lstrip("/"))
+            if "globalxetfs" not in u:
+                continue
+            try:
+                body = ad.s.get(u, timeout=20).text
+            except Exception as e:
+                hits[u] = ["<取失败 %s>" % e]
+                continue
+            snips = [body[max(0, m.start() - 150): m.end() + 150] for m in pat.finditer(body)][:20]
+            if snips:
+                hits[u] = snips
+        with open(os.path.join(out_dir, "script_hits.json"), "w", encoding="utf-8") as f:
+            json.dump(hits, f, ensure_ascii=False, indent=1)
+        print("诊断已保存：%s（页面 %d 字节，表格 %d 张，相关脚本 %d 个）"
+              % (out_dir, len(html), len(gx.summarize_tables(html)), len(hits)))
+    except Exception as e:
+        print("诊断保存失败（不影响主流程）：%s" % e)
+
+
 # ---------- 指数点位（现货名义口径的分子需要） ----------
 
 def fetch_index_close(symbol="hkHSI"):
@@ -393,6 +441,8 @@ def main(argv=None):
     p.add_argument("--index-levels", default=None,
                    help="历史指数点位：'2026-10-31=26000,...' 或 json 文件路径")
     p.add_argument("--overwrite", action="store_true", help="同一 as_of 已存档时覆盖")
+    p.add_argument("--debug-dir", default=None,
+                   help="保存原始页面、页面上所有表格摘要与下载链接，供排查解析问题")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sf = sub.add_parser("fetch", help="联网抓当日持仓")
@@ -421,17 +471,27 @@ def main(argv=None):
 
     a = p.parse_args(argv)
     levels = _index_levels_arg(a.index_levels)
-    if a.hsi == "auto":
-        a.hsi = fetch_index_close("hkHSI")
-        print("自动取到指数点位：%s" % a.hsi)
+    hsi_auto = (a.hsi == "auto")
+    if hsi_auto:
+        a.hsi = None          # auto：只在快照没有官网点位时才去外部取（见下）
     elif a.hsi is not None:
         a.hsi = float(a.hsi)
 
     if a.cmd == "fetch":
         ad = gx.GlobalXAdapter()
-        snap = ad.fetch_holdings(a.code, urls=a.url)
-        if a.hsi:
+        try:
+            snap = ad.fetch_holdings(a.code, urls=a.url)
+        finally:
+            if a.debug_dir:
+                dump_debug(ad, a.debug_dir)
+        if a.hsi:                                   # 显式给的点位以用户为准
             snap["index_level"] = a.hsi
+        elif hsi_auto and not snap.get("index_level"):
+            # 官网期权表自带与持仓同一天的「指數價格」，优先用它；没有才取外部行情
+            snap["index_level"] = fetch_index_close("hkHSI")
+            snap.setdefault("warnings", []).append(
+                "官网未给指数点位，已用腾讯行情 %s（可能与持仓不是同一天）" % snap["index_level"])
+        print("指数点位：%s" % snap.get("index_level"))
         print("抓取成功：%s as_of=%s 来源=%s" % (snap["fund"], snap["as_of"], snap["source_url"]))
         save_snapshot(snap, a.data_dir, overwrite=a.overwrite)
         rebuild_report(a.data_dir, a.vol, levels)

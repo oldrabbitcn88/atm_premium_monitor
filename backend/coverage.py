@@ -426,6 +426,8 @@ def compute_coverage(snapshot, index_level=None, vol_annual=0.20, rate=0.0):
 
     wavg_strike = (strike_num / strike_den) if strike_den else None
     wavg_dte = (dte_num / dte_den) if dte_den else None
+    if wavg_dte is not None and wavg_dte < 0:
+        warnings.append("期权到期日早于持仓日期（加权剩余 %.1f 天），as_of 很可能记错了" % wavg_dte)
 
     def _ratio(num, ok=True):
         if not ok or not long_index_equiv:

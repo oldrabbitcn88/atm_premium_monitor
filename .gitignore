@@ -30,3 +30,6 @@ deploy/local/hsi_job.log
 
 # 构建产物
 _site/
+
+# 3419 抓取诊断（workflow 以 artifact 上传，不入库）
+deploy/data/gx3419/_debug/
