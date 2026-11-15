@@ -59,6 +59,30 @@ function Invoke-WithTimeout($script, $extraArgs, $timeoutSec = 300) {
   }
 }
 
+function Sync-PendingDataCommits {
+  # 推送失败（如代理未开导致 TLS 握手失败）后，后续运行会因"本月已记录"直接跳过，
+  # 数据提交就一直滞留本地（2026-10-29 恒指即如此）。这里每次检查并重推。
+  # 只推纯数据提交（仅改动 deploy/data/hsi.json），不碰你自己的代码提交。
+  Push-Location $ProjectDir
+  try {
+    if ((git rev-parse --abbrev-ref HEAD) -ne "main") { Write-Log "当前不在 main 分支，跳过重推检查"; return }
+    git fetch -q origin main 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Log "git fetch 失败（网络/代理？），下次再试"; return }
+    $ahead = [int](git rev-list --count origin/main..HEAD)
+    if ($ahead -eq 0) { return }
+    $files = @(git diff --name-only origin/main...HEAD)
+    $nonData = @($files | Where-Object { $_ -ne "deploy/data/hsi.json" })
+    if ($nonData.Count -gt 0) {
+      Write-Log "本地有 $ahead 个未推送提交，含非数据文件（$($nonData -join ', ')），不自动推送"
+      return
+    }
+    Write-Log "发现 $ahead 个未推送的数据提交，重推"
+    git pull -q --rebase --autostash origin main 2>&1 | ForEach-Object { Write-Log "  $_" }
+    git push -q origin HEAD:main 2>&1 | ForEach-Object { Write-Log "  $_" }
+    if ($LASTEXITCODE -eq 0) { Write-Log "重推成功" } else { Write-Log "重推失败，下次再试" }
+  } finally { Pop-Location }
+}
+
 function Test-Port($port) {
   try {
     $c = New-Object Net.Sockets.TcpClient
@@ -105,6 +129,9 @@ try {
   } else {
     Write-Log "运行同步脚本"
     Invoke-WithTimeout "deploy\local\sync_hsi.py" @("--upload")
+    Write-Log "同步港交所费率表（有新月份则补入，临时值升级为港交所口径）"
+    Invoke-WithTimeout "deploy\local\import_hsi_csv.py" @("--upload")
+    Sync-PendingDataCommits
   }
 } finally {
   if ($startedByUs -and -not $KeepOpenD) {

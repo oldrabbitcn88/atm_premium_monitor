@@ -97,9 +97,22 @@ def qq_price(code):
     if len(fields) < 4:
         return None, None
     price = float(fields[3])
-    # 行情时间戳在索引30附近（YYYYMMDDHHMMSS）
+    # 字段[30] 为行情时间戳 YYYYMMDDHHMMSS（收盘后通常是 15:xx~16:xx 的盘后时间）
     ts = fields[30] if len(fields) > 30 else ""
-    return price, ts[:8]
+    return price, ts
+
+
+def session_of(ts):
+    """行情时间戳 → (该行情所属交易日, 是否已收盘)；解析失败返回 (None, False)
+
+    交割日判断必须以行情自身的日期为准，而不是脚本运行的日期：
+    GitHub 定时任务常延迟 5~10 小时、会跨过北京午夜，推送也会在任意时刻触发运行，
+    若按运行日期判断，就会把前一交易日的收盘价记成交割日数据（2026-08 中证500 即栽在这里）。
+    """
+    if not ts or len(ts) < 12 or not ts[:12].isdigit():
+        return None, False
+    d = datetime.date(int(ts[:4]), int(ts[4:6]), int(ts[6:8]))
+    return d, ts[8:12] >= "1500"
 
 
 def cffex_io_quotes():
@@ -203,52 +216,40 @@ def update_point(items, key, ts, underlying, strike, opt_price, py, expiry, cont
     return "appended"
 
 
+def collect(items, report, key, qq_code, rule_fn, fetch_fn):
+    """按行情自身日期判断是否落在交割窗口内，是则采集并记为该交易日的数据点"""
+    price, qts = qq_price(qq_code)
+    if not price:
+        report.append(f"{key}: 腾讯行情失败"); return
+    day, closed = session_of(qts)
+    if day is None:
+        report.append(f"{key}: 行情时间戳无法解析({qts!r})，不记录"); return
+    rule = rule_fn(day.year, day.month)
+    if not (rule and 0 <= (day - rule).days <= EXPIRY_WINDOW_DAYS):
+        report.append(f"{key}: 行情日 {day} 非交割日(规则日{rule})"); return
+    if not closed:
+        report.append(f"{key}: 行情日 {day} 尚未收盘(时间戳 {qts})，不记录"); return
+    got = fetch_fn(price, day)
+    if not got:
+        report.append(f"{key}: 期权行情获取失败"); return
+    strike, opt, code = got
+    py = opt / price
+    ny, nm = next_month_ym(day)
+    act = update_point(items, key, day.strftime("%Y-%m-%d"), price,
+                       strike, opt, round(py, 6), f"{ny:04d}-{nm:02d}", code)
+    report.append(f"{key}: {act} | 行情日{day} 收盘{price} ATM{strike} 权利金{opt} PY={py:.4%}")
+
+
 def main():
-    today = now_cn().date()
-    print(f"[build_data] 运行时间: {today}")
+    print(f"[build_data] 运行时间: {now_cn():%Y-%m-%d %H:%M}（交割日以行情日期为准）")
     with open(DATA_FILE, encoding="utf-8") as f:
         payload = json.load(f)
     items = payload["items"]
     before = json.dumps(items, sort_keys=True, ensure_ascii=False)
     report = []
 
-    # ---- CSI300：IO ----
-    rule = io_rule_day(today.year, today.month)
-    if rule and 0 <= (today - rule).days <= EXPIRY_WINDOW_DAYS:
-        price, _ = qq_price("sh000300")
-        if price:
-            got = fetch_io(price, today)
-            if got:
-                strike, opt, code = got
-                py = opt / price
-                act = update_point(items, "CSI300", today.strftime("%Y-%m-%d"), price,
-                                   strike, opt, round(py, 6), f"{next_month_ym(today)[0]:04d}-{next_month_ym(today)[1]:02d}", code)
-                report.append(f"CSI300: {act} | 收盘{price} ATM{strike} 权利金{opt} PY={py:.4%}")
-            else:
-                report.append("CSI300: IO行情获取失败")
-        else:
-            report.append("CSI300: 腾讯行情失败")
-    else:
-        report.append(f"CSI300: 非交割日(规则日{rule})")
-
-    # ---- CSI500：510500 ----
-    rule = etf_rule_day(today.year, today.month)
-    if rule and 0 <= (today - rule).days <= EXPIRY_WINDOW_DAYS:
-        price, _ = qq_price("sh510500")
-        if price:
-            got = fetch_etf(price, today)
-            if got:
-                strike, opt, tcode = got
-                py = opt / price
-                act = update_point(items, "CSI500", today.strftime("%Y-%m-%d"), price,
-                                   strike, opt, round(py, 6), f"{next_month_ym(today)[0]:04d}-{next_month_ym(today)[1]:02d}", tcode)
-                report.append(f"CSI500: {act} | 收盘{price} ATM{strike} 权利金{opt} PY={py:.4%}")
-            else:
-                report.append("CSI500: 期权行情获取失败")
-        else:
-            report.append("CSI500: 腾讯行情失败")
-    else:
-        report.append(f"CSI500: 非交割日(规则日{rule})")
+    collect(items, report, "CSI300", "sh000300", io_rule_day, fetch_io)
+    collect(items, report, "CSI500", "sh510500", etf_rule_day, fetch_etf)
 
     payload["generated_at"] = now_cn().strftime("%Y-%m-%d %H:%M:%S")
     with open(DATA_FILE, "w", encoding="utf-8") as f:

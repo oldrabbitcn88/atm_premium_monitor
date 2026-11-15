@@ -90,7 +90,18 @@ def main():
     items = payload["items"]
     hist = items["HSI"]["history"]
     ym = today.strftime("%Y-%m")
-    if any((h.get("ts") or "")[:7] == ym for h in hist):
+    have = {(h.get("ts") or "")[:7] for h in hist}
+
+    # 上月缺口检查：关机错过交割日（如 2026-09 国庆）时，开机后只看当月会把上月静默漏掉。
+    # 上月合约早已到期、OpenD 无历史期权行情，抓不回来；这里明确告警，
+    # 由 run_hsi_job 随后调用的 import_hsi_csv 在港交所费率表更新后自动补入。
+    py_, pm_ = (today.year - 1, 12) if today.month == 1 else (today.year, today.month - 1)
+    if f"{py_:04d}-{pm_:02d}" not in have:
+        print(f"[sync_hsi] ⚠ 上月 {py_:04d}-{pm_:02d} 缺数据（交割日 "
+              f"{FutuAdapter.monthly_expiry_of(py_, pm_)} 未采到）。"
+              "请更新港交所费率表 CSV，作业会自动补入")
+
+    if ym in have:
         print("[sync_hsi] 本月已记录，跳过")
         return
 

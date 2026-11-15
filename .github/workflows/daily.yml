@@ -3,6 +3,9 @@ name: daily-atm-premium
 on:
   schedule:
     - cron: '40 7 * * 1-5'   # UTC 07:40 = 北京时间 15:40（A股收盘后）
+    - cron: '40 10 * * 1-5'  # 备份：北京 18:40。GitHub 定时常延迟 5~10h 甚至丢跑，
+                             # 两个时点叠加延迟后都落在收盘后~次日开盘前；
+                             # build_data 以行情日期判定交割日，重复运行无副作用
   workflow_dispatch:
   push:
     branches: [main]
@@ -11,6 +14,10 @@ on:
       - 'deploy/data/**'
       - 'deploy/actions/**'
       - '.github/workflows/daily.yml'
+
+concurrency:
+  group: daily-atm-premium   # 两个定时/推送触发可能重叠，串行执行避免回写冲突
+  cancel-in-progress: false
 
 permissions:
   contents: write             # 回写 data.json
