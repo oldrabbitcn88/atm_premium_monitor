@@ -381,6 +381,27 @@ def dump_debug(ad, out_dir, max_scripts=15):
             json.dump(hits, f, ensure_ascii=False, indent=1)
         print("诊断已保存：%s（页面 %d 字节，表格 %d 张，相关脚本 %d 个）"
               % (out_dir, len(html), len(gx.summarize_tables(html)), len(hits)))
+        # 摘要同时打进日志：artifact 不方便取时，读运行日志就能看到页面结构
+        print("----- 诊断摘要 -----")
+        for tb in gx.summarize_tables(html):
+            print("[表%d] %d 行 | 前文…%s | 表头 %s | 首行 %s" % (
+                tb["index"], tb["n_rows"], tb["heading_before"][-80:], tb["header"],
+                (tb["sample_rows"][0] if tb["sample_rows"] else [])))
+        hint = [u for u in urls if _LINK_HINT.search(u)]
+        print("疑似下载链接(%d)：%s" % (len(hint), hint[:30]))
+        print("页面内 full_holdings 出现 %d 次" % len(re.findall(r"full_holdings", html)))
+        for m in list(re.finditer(r"full_holdings", html))[:3]:
+            print("  …%s…" % re.sub(r"\s+", " ", html[max(0, m.start() - 250): m.end() + 150]))
+        print("脚本(%d)：%s" % (len(scripts), scripts[:20]))
+        for u, snips in hits.items():
+            for sn in snips[:4]:
+                print("  [%s] …%s…" % (u.rsplit("/", 1)[-1][:40], re.sub(r"\s+", " ", sn)[:320]))
+        for kw in ("期貨", "期货", "Futures", "FUT", "盈富", "2800"):
+            print("页面含「%s」%d 次" % (kw, len(re.findall(re.escape(kw), html))))
+        for m in list(re.finditer(r"期貨|Futures", html))[:4]:
+            print("  …%s…" % re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ",
+                                                      html[max(0, m.start() - 200): m.end() + 300]))[:300])
+        print("----- 诊断摘要结束 -----")
     except Exception as e:
         print("诊断保存失败（不影响主流程）：%s" % e)
 

@@ -415,6 +415,11 @@ def attach_option_table(snapshot, html, multiplier=50.0):
             "页面上没解析到期权持仓表；若 CSV 里也没有期权腿，覆盖比率的分子会缺失")
         return snapshot
     snapshot["option_table"] = opts
+    facts = parse_fund_facts(html)
+    if facts:
+        snapshot["fund_facts"] = facts
+        if facts.get("index_close") and not snapshot.get("index_level"):
+            snapshot["index_level"] = facts["index_close"]   # 精确收市价，优先于期权表四舍五入值
     if not snapshot.get("as_of"):
         d = as_of_from_option_table(opts)
         if d:
@@ -448,6 +453,30 @@ def as_of_from_option_table(opts):
         if exp and dte is not None:
             return (datetime.date.fromisoformat(exp) - datetime.timedelta(days=int(dte))).isoformat()
     return None
+
+
+def parse_fund_facts(html):
+    """页面上的键值表：「期權詳情」里的總資產淨值、恒生指數收市價；资产配置里的現金比率。
+    实测（2026-11-12）：總資產淨值(以港元計算) HKD 3,178,362,136.84；恒生指數收市價 24,008.55；
+    资产配置 現金 32.0%——恒指期货多头不逐项披露，就在这部分现金背后。"""
+    facts = {}
+    for tbl in re.findall(r"<table[^>]*>(.*?)</table>", html, re.S | re.I):
+        for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", tbl, re.S | re.I):
+            cells = [re.sub(r"\s+", "", re.sub(r"<[^>]+>", " ", c)).replace("&nbsp;", "")
+                     for c in re.findall(r"<t[hd][^>]*>(.*?)</t[hd]>", tr, re.S | re.I)]
+            cells = [c for c in cells if c]
+            if len(cells) != 2:
+                continue
+            k, v = cells
+            if "總資產淨值" in k or "总资产净值" in k or k.lower().startswith("totalnav"):
+                facts.setdefault("nav_total", parse_number(v))
+            elif "恒生指數收市價" in k or "恒生指数收市价" in k:
+                facts.setdefault("index_close", parse_number(v))
+            elif k in ("現金", "现金", "Cash"):
+                x = parse_number(v)
+                if x is not None:
+                    facts.setdefault("cash_pct", x / 100.0)
+    return {k: v for k, v in facts.items() if v is not None}
 
 
 def summarize_tables(html):
