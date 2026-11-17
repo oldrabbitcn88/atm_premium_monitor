@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-17T04:36:50+08:00",
+ "generated_at": "2026-11-17T17:37:26+08:00",
  "note": "备兑覆盖比率 = 卖出认购期权标的名义 / (正股市值+指数ETF市值+指数期货多头名义)",
  "series": [
   {
@@ -131,6 +131,71 @@
    "nav_total": 3126829160.18,
    "cash_pct_nav": 0.32,
    "long_vs_nav": 1.0159
+  },
+  {
+   "as_of": "2026-11-16",
+   "fund": "3419.HK",
+   "official_coverage_pct_nav": 1.01,
+   "nav_implied": 3191481275.25,
+   "source_url": "https://www.globalxetfs.com.hk/zh-hant/funds/covered-call-etf/",
+   "index_level": 23753.84,
+   "index_level_source": "param",
+   "equity_mv": 2131930865.67,
+   "index_etf_mv": 0.0,
+   "futures_notional": 1110312500.0,
+   "long_index_equiv": 3242243365.67,
+   "cash_mv": 54969600.0,
+   "other_mv": 0.0,
+   "short_call_contracts": 2714.0,
+   "short_call_mv": -18048100.0,
+   "short_call_spot_notional": 3223396088.0,
+   "short_call_strike_notional": 3243230000.0,
+   "coverage_spot": 0.994187,
+   "coverage_strike": 1.000304,
+   "coverage_delta_est": 0.386513,
+   "delta_vol_assumed": 0.2,
+   "wavg_strike": 23900.0,
+   "wavg_moneyness": 0.006153,
+   "wavg_dte": 4.0,
+   "n_call_legs": 1,
+   "n_future_legs": 1,
+   "put_legs": [],
+   "call_legs": [
+    {
+     "name": "CALL HSI WEEKLY OPTIONS 11/20/26 23900",
+     "ticker": "",
+     "contracts": -2714.0,
+     "strike": 23900.0,
+     "expiry": "2026-11-20",
+     "multiplier": 50.0,
+     "market_value": -18048100.0,
+     "side": "short",
+     "delta_est": 0.3887729527502327,
+     "dte": 4
+    }
+   ],
+   "future_legs": [
+    {
+     "name": "HANG SENG IDX FUT 11/27/26",
+     "ticker": "HIX6",
+     "contracts": 935.0,
+     "price": 23750.0,
+     "multiplier": 50.0,
+     "notional": 1110312500.0,
+     "expiry": "2026-11-27",
+     "market_value": 34596400.0
+    }
+   ],
+   "bucket_counts": {
+    "EQUITY": 95,
+    "CASH": 1,
+    "FUTURE_LONG": 1,
+    "CALL_SHORT": 1
+   },
+   "warnings": [],
+   "nav_total": 3191348717.69,
+   "cash_pct_nav": 0.32,
+   "long_vs_nav": 1.015948
   }
  ]
 }
