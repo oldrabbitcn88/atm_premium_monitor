@@ -114,7 +114,7 @@ python -m backend.tools.sync_gx3419 ../3419-covered-call-monitor/data  # 从上�
 python -m backend.tools.gx_coverage monthly-urls --start 2024-03 --check  # 官方备兑月报
 ```
 
-[3419-covered-call-monitor](https://github.com/oldrabbitcn88/3419-covered-call-monitor) 负责每日采集和校验。此仓库同步 `deploy/data/gx3419/coverage.json` 和 `coverage.csv`，并保留先前的 `raw/` 快照。自动同步通过 Actions Secret `GX3419_SOURCE_TOKEN` 读取上游私有仓库，设置方法见下方文档。
+[3419-covered-call-monitor](https://github.com/oldrabbitcn88/3419-covered-call-monitor) 负责每日采集和校验。此仓库同步 `deploy/data/gx3419/coverage.json` 和 `coverage.csv`，并保留先前的 `raw/` 快照。自动同步直接读取公开上游仓库。
 
 两个口径同时输出：
 
