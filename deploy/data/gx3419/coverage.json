@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-20T10:59:31+08:00",
+ "generated_at": "2026-11-21T03:15:47+08:00",
  "note": "备兑覆盖比率 = 卖出认购期权标的名义 / (正股市值+指数ETF市值+指数期货多头名义)",
  "upstream_repository": "oldrabbitcn88/3419-covered-call-monitor",
  "upstream_dates": [
@@ -17,7 +17,8 @@
   "2026-11-13",
   "2026-11-16",
   "2026-11-17",
-  "2026-11-18"
+  "2026-11-18",
+  "2026-11-19"
  ],
  "series": [
   {
@@ -562,7 +563,7 @@
      "multiplier": 50.0,
      "market_value": -10161200.0,
      "side": "short",
-     "delta_est": 0.29670433381909905,
+     "delta_est": 0.296704333819099,
      "dte": 3
     }
    ],
@@ -974,6 +975,70 @@
    "nav_total": 3143807971.06,
    "cash_pct_nav": 0.32,
    "long_vs_nav": 1.010434
+  },
+  {
+   "as_of": "2026-11-19",
+   "fund": "3419.HK",
+   "official_coverage_pct_nav": 1.005,
+   "nav_implied": 3084186899.5,
+   "source_url": "https://www.globalxetfs.com.hk/funds/covered-call-etf/",
+   "index_level": 22841.62,
+   "index_level_source": "upstream",
+   "equity_mv": 2050181151.42,
+   "index_etf_mv": 0.0,
+   "futures_notional": 1066274000.0,
+   "long_index_equiv": 3116455151.42,
+   "cash_mv": 55020000.0,
+   "other_mv": 0.0,
+   "short_call_contracts": 2714.0,
+   "short_call_mv": -135700.0,
+   "short_call_spot_notional": 3099607834.0,
+   "short_call_strike_notional": 3243230000.0,
+   "coverage_spot": 0.994594,
+   "coverage_strike": 1.040679,
+   "coverage_delta_est": 8e-06,
+   "delta_vol_assumed": 0.2,
+   "wavg_strike": 23900.0,
+   "wavg_moneyness": 0.046336,
+   "wavg_dte": 1.0,
+   "n_call_legs": 1,
+   "n_future_legs": 1,
+   "put_legs": [],
+   "call_legs": [
+    {
+     "name": "CALL HSI WEEKLY OPTIONS 11/20/26 23900",
+     "ticker": "",
+     "contracts": -2714.0,
+     "strike": 23900.0,
+     "expiry": "2026-11-20",
+     "multiplier": 50.0,
+     "market_value": -135700.0,
+     "side": "short",
+     "delta_est": 7.749192069916866e-06,
+     "dte": 1
+    }
+   ],
+   "future_legs": [
+    {
+     "name": "HANG SENG IDX FUT 11/27/26",
+     "ticker": "HIX6",
+     "contracts": 935.0,
+     "price": 22808.0,
+     "multiplier": 50.0,
+     "notional": 1066274000.0,
+     "expiry": "2026-11-27",
+     "market_value": -9442100.0
+    }
+   ],
+   "bucket_counts": {
+    "EQUITY": 95,
+    "CASH": 1,
+    "CALL_SHORT": 1,
+    "FUTURE_LONG": 1
+   },
+   "warnings": [],
+   "nav_total": 3084263450.17,
+   "long_vs_nav": 1.010437
   }
  ]
 }
