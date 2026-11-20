@@ -17,27 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Check upstream credentials
-        env:
-          GX3419_SOURCE_TOKEN: ${{ secrets.GX3419_SOURCE_TOKEN }}
-        run: |
-          if [ -z "$GX3419_SOURCE_TOKEN" ]; then
-            echo "::error::Configure GX3419_SOURCE_TOKEN with Contents read access to 3419-covered-call-monitor."
-            exit 1
-          fi
-
       - uses: actions/checkout@v4
 
-      - name: Check out upstream data
-        uses: actions/checkout@v4
-        with:
-          repository: oldrabbitcn88/3419-covered-call-monitor
-          ref: main
-          token: ${{ secrets.GX3419_SOURCE_TOKEN }}
-          path: _gx3419_source
-          sparse-checkout: |
-            data
-          persist-credentials: false
+      - name: Check out public upstream data
+        run: git -c http.https://github.com/.extraheader= clone --depth 1 --branch main https://github.com/oldrabbitcn88/3419-covered-call-monitor.git _gx3419_source
 
       - uses: actions/setup-python@v5
         with:
