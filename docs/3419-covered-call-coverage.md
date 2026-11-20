@@ -12,7 +12,7 @@
 > 1. **没有服务器端的 CSV 文件，按日期回填历史行不通。** 「每日持股 (.CSV)」按钮是前端 JS
 >    （`table2CSV`）把页面上的持股表当场转成 `data:text/csv` 下载，文件名
 >    `3419_full_holdings_YYYYMMDD.csv` 里的日期只是标签。CSV 内容 = 页面持股表，
->    本仓库直接解析页面即可，每天一份；**逐日历史只能从开始抓的那天起自建**。
+>    上游仓库直接解析页面并按披露日归档；**逐日历史只能从开始抓的那天起自建**。
 > 2. **持股表里正股、恒指期货、期权三条腿都有。** 期货行写作 `HANG SENG IDX FUT 11/27/26`、
 >    代码 `HIX6`（彭博根代码 HI = 恒指），按「张数 × 期货价 × 50」计名义；另有货币基金
 >    `3137`（美元货币市场 ETF）按现金类处理、不计入多头。2026-11-12：正股 21.55 亿 +
@@ -26,14 +26,14 @@
 | 你想要的 | 能不能拿到 | 途径 | 回溯起点 |
 |---|---|---|---|
 | **每日**逐日全量持仓的历史存档 | **公开渠道没有**（CSV 由前端生成，无服务器历史文件，已实测） | —— | —— |
-| 每日全量持仓，从今天起往后 | 能，且是唯一能得到真·逐日序列的办法 | 官网页面持股表 + 期权表，每日自建快照（`gx3419.yml`） | 2026-11-12 |
+| 每日全量持仓，从今天起往后 | 能，且是唯一能得到真·逐日序列的办法 | 官网页面持股表 + 期权表，每日自建快照（`3419-covered-call-monitor`） | 2026-10-29 |
 | **月度**覆盖率/行权价/权利金 | 能 | 官方《Covered Call Monthly Commentary》PDF | 2024-03 起（基金 2024-02-28 成立） |
 | **半年度**逐张期权/期货明细（审计口径） | 能，最权威 | 中期报告 / 年度报告的「投资组合」表 | 首个报告期起 |
 | 零散的历史日期 | 碰运气 | Internet Archive 快照 | 看爬虫抓过什么 |
 
 **为什么可能没有每日历史**：SFC 对 ETF 的要求是「每日披露全部持仓」，但**不要求保留历史**。
 页面上永远只挂当日那一份，而且那份 CSV 是浏览器端临时生成的，服务器上不存在历史文件。所以任何人想要逐日序列，
-只有两条路：要么自己从某天起每天抓并存档（本仓库脚本做的事），要么买 Bloomberg / 万得 / Refinitiv 的历史持仓库。
+只有两条路：要么自己从某天起每天抓并存档（上游监测仓库做的事），要么买 Bloomberg / 万得 / Refinitiv 的历史持仓库。
 
 > 一句话：**「下载过去所有」做不到，但「把能拿到的三个频率拼起来 + 从现在起自建逐日档」可以做到，
 > 而且足够回答覆盖比率的问题** —— 因为该基金的覆盖比率由策略机械决定，月度/半年度点位已能刻画其水平与波动，
@@ -82,25 +82,17 @@
 注意：期货行的「市值」列只是保证金/估值口径（11-12 为 4,475.9 万），**不是名义敞口**，
 必须按张数 × 期货价 × 50 计算。抓取诊断见 `gx3419.yml` 的 `--debug-dir`（运行日志里也有摘要）。
 
-### 2.3 自动化（本仓库已实现）
+### 2.3 自动同步
+
+[3419-covered-call-monitor](https://github.com/oldrabbitcn88/3419-covered-call-monitor) 负责抓取官网、校验和归档。此仓库的 `gx3419-coverage-sync` 工作流读取上游 `data/coverage.csv`、逐日持仓 CSV 及期权详情 JSON，并更新 `deploy/data/gx3419/coverage.csv` 和 `coverage.json`。主覆盖率取上游结果，行权价及 Delta 等附加指标使用同一批存档计算。
+
+上游为私有仓库。在本仓库 Settings → Secrets and variables → Actions 添加 `GX3419_SOURCE_TOKEN`。用仅限 `3419-covered-call-monitor` 且 Contents 为 Read-only 的 fine-grained PAT，配置后可手动运行工作流。本地同步命令如下：
 
 ```bash
-pip install requests openpyxl
-
-# 抓当日持仓 → 存档 → 重算覆盖比率序列（恒指点位自动取）
-python -m backend.tools.gx_coverage --code 3419 --hsi auto fetch
+python -m backend.tools.sync_gx3419 ../3419-covered-call-monitor/data
 ```
 
-产出（默认 `deploy/data/gx3419/`）：
-
-```
-raw/2026-10-31.json   当日标准化持仓快照（含原始列，可复算、可审计）
-coverage.json         覆盖比率时间序列
-coverage.csv          同上，Excel/pandas 直接用
-```
-
-已配好 `.github/workflows/gx3419.yml`：每日两次（港时 09:30 / 18:30）自动抓并回写仓库。
-**按 `as_of` 去重**，所以一天跑多次、事后补跑都不会重复落点。
+此前保存在本仓库 `deploy/data/gx3419/raw/` 的快照可用于审计。历史研究使用旧 CLI 时，可通过 `--data-dir` 指定独立输出目录，以保留同步生成的发布文件。
 
 ### 2.4 ~~按日期枚举回填历史~~（已实测不可行）
 
@@ -147,7 +139,7 @@ coverage.csv          同上，Excel/pandas 直接用
 
 ```bash
 # 手工把持仓文件下载到本地，csv/xlsx/json/html 都能吃
-python -m backend.tools.gx_coverage --hsi 26013.5 local ~/Downloads/3419_holdings_20261031.csv
+python -m backend.tools.gx_coverage --data-dir ./gx3419-research --hsi 26013.5 local ~/Downloads/3419_holdings_20261031.csv
 ```
 
 ---
@@ -197,7 +189,7 @@ python -m backend.tools.gx_coverage monthly-urls --start 2024-03 --check
 ### 3.3 D 层｜Internet Archive 补零散历史
 
 ```bash
-python -m backend.tools.gx_coverage --code 3419 wayback --since 20240228
+python -m backend.tools.gx_coverage --data-dir ./gx3419-research --code 3419 wayback --since 20240228
 ```
 
 脚本用 CDX API 列出所有历史快照并逐个尝试解析。
@@ -295,14 +287,14 @@ df.assign(dte_bucket=pd.cut(df.wavg_dte, [0, 7, 21, 45, 400])).groupby("dte_buck
 ## 7. 工具速查
 
 ```bash
-# 抓当日 + 入档 + 重算（恒指点位自动取腾讯行情）
-python -m backend.tools.gx_coverage --code 3419 --hsi auto fetch
+# 同步上游日度覆盖率
+python -m backend.tools.sync_gx3419 ../3419-covered-call-monitor/data
 
 # 手工下载的文件入档
-python -m backend.tools.gx_coverage --hsi 26013.5 local ./3419_holdings_20261031.csv
+python -m backend.tools.gx_coverage --data-dir ./gx3419-research --hsi 26013.5 local ./3419_holdings_20261031.csv
 
 # 只重算（不联网）；可用历史点位表修正现货口径
-python -m backend.tools.gx_coverage report --index-levels hsi_closes.json --vol 0.22
+python -m backend.tools.gx_coverage --data-dir ./gx3419-research report --index-levels hsi_closes.json --vol 0.22
 
 # Internet Archive 回填
 python -m backend.tools.gx_coverage --code 3419 wayback --since 20240228

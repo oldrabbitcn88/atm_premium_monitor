@@ -101,7 +101,8 @@ python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 backend/coverage.py                 覆盖比率引擎（分类/乘数/三种口径/BS delta）
 backend/data/globalx_adapter.py     官网持仓抓取与解析（csv/xlsx/json/html 自适应）
 backend/tools/gx_coverage.py        CLI：fetch / local / report / wayback / monthly-urls
-.github/workflows/gx3419.yml        每日两次自动抓取并回写仓库
+backend/tools/sync_gx3419.py         读取上游存档并生成兼容的 CSV/JSON
+.github/workflows/gx3419.yml        定时同步上游数据
 docs/3419-covered-call-coverage.md  数据来源、口径定义、坑与统计方法（先读这份）
 tests/test_coverage.py              25 个单元测试（python -m unittest discover -s tests）
 ```
@@ -109,13 +110,11 @@ tests/test_coverage.py              25 个单元测试（python -m unittest disc
 ```bash
 pip install requests openpyxl
 
-python -m backend.tools.gx_coverage --code 3419 --hsi auto fetch        # 抓当日 → 存档 → 重算
-python -m backend.tools.gx_coverage --hsi 26013.5 local ./holdings.csv  # 手工下载的文件入档
-python -m backend.tools.gx_coverage report                              # 不联网，仅重算
+python -m backend.tools.sync_gx3419 ../3419-covered-call-monitor/data  # 从上游存档同步
 python -m backend.tools.gx_coverage monthly-urls --start 2024-03 --check  # 官方备兑月报
 ```
 
-数据落在 `deploy/data/gx3419/`：`raw/<as_of>.json`（每日快照）、`coverage.json`、`coverage.csv`。
+[3419-covered-call-monitor](https://github.com/oldrabbitcn88/3419-covered-call-monitor) 负责每日采集和校验。此仓库同步 `deploy/data/gx3419/coverage.json` 和 `coverage.csv`，并保留先前的 `raw/` 快照。自动同步通过 Actions Secret `GX3419_SOURCE_TOKEN` 读取上游私有仓库，设置方法见下方文档。
 
 两个口径同时输出：
 
