@@ -86,7 +86,7 @@
 
 [3419-covered-call-monitor](https://github.com/oldrabbitcn88/3419-covered-call-monitor) 负责抓取官网、校验和归档。此仓库的 `gx3419-coverage-sync` 工作流读取上游 `data/coverage.csv`、逐日持仓 CSV 及期权详情 JSON，并更新 `deploy/data/gx3419/coverage.csv` 和 `coverage.json`。主覆盖率取上游结果，行权价及 Delta 等附加指标使用同一批存档计算。
 
-上游为私有仓库。在本仓库 Settings → Secrets and variables → Actions 添加 `GX3419_SOURCE_TOKEN`。用仅限 `3419-covered-call-monitor` 且 Contents 为 Read-only 的 fine-grained PAT，配置后可手动运行工作流。本地同步命令如下：
+同步工作流直接读取公开上游仓库，可在 Actions 中手动运行。也可以在本地运行以下命令。
 
 ```bash
 python -m backend.tools.sync_gx3419 ../3419-covered-call-monitor/data
