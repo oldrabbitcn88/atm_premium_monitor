@@ -53,7 +53,7 @@ BUCKET_CASH = "CASH"              # 现金/保证金/货币基金
 BUCKET_OTHER = "OTHER"
 
 # 指数 ETF 代码（港股），持有即视为指数多头敞口
-INDEX_ETF_TICKERS = {"2800", "02800", "2828", "02828", "3033", "03033", "2833", "02833"}
+INDEX_ETF_TICKERS = {"2800", "02800", "2828", "02828", "3033", "03033", "2833", "02833", "82800", "82833"}
 INDEX_ETF_NAME_PAT = re.compile(
     r"TRACKER\s+FUND|盈富|TRACKER|HANG\s+SENG\s+INDEX\s+ETF|恒生指數\s*ETF|恒生指数\s*ETF",
     re.I,

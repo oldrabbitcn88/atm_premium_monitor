@@ -36,12 +36,17 @@ def import_day(source, day, previous):
     snapshot = load_local_file(str(holdings), as_of=date, index_level=float(index))
     snapshot.update(source_url=day["source"], option_table=option_table)
     fund_facts = {}
-    if previous.get("nav_total") is not None:
-        fund_facts["nav_total"] = previous["nav_total"]
+    nav = details.get("nav_total", previous.get("nav_total"))
+    if nav is not None:
+        fund_facts["nav_total"] = float(nav)
     if previous.get("cash_pct_nav") is not None:
         fund_facts["cash_pct"] = previous["cash_pct_nav"]
     snapshot["fund_facts"] = fund_facts
     result = compute_coverage(snapshot)
+
+    index_etf = Decimal(day.get("index_etf_hkd") or "0")
+    if Decimal(str(result["index_etf_mv"])) != index_etf:
+        raise ValueError(f"{date}: archived holdings disagree with index_etf_hkd")
 
     for field, column in (
         ("equity_mv", "equity_hkd"),
@@ -51,7 +56,7 @@ def import_day(source, day, previous):
         if Decimal(str(result[field])) != Decimal(day[column]):
             raise ValueError(f"{date}: archived holdings disagree with {column}")
 
-    long_notional = Decimal(day["equity_hkd"]) + Decimal(day["futures_notional_hkd"])
+    long_notional = Decimal(day["equity_hkd"]) + Decimal(day["futures_notional_hkd"]) + index_etf
     coverage = Decimal(day["coverage_pct"]) / 100
     if long_notional <= 0 or (official / long_notional).quantize(Decimal("0.000001")) != coverage:
         raise ValueError(f"{date}: inconsistent upstream coverage ratio")
