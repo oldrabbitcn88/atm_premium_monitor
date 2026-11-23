@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-21T03:15:47+08:00",
+ "generated_at": "2026-11-23T19:16:36+08:00",
  "note": "备兑覆盖比率 = 卖出认购期权标的名义 / (正股市值+指数ETF市值+指数期货多头名义)",
  "upstream_repository": "oldrabbitcn88/3419-covered-call-monitor",
  "upstream_dates": [
@@ -18,7 +18,8 @@
   "2026-11-16",
   "2026-11-17",
   "2026-11-18",
-  "2026-11-19"
+  "2026-11-19",
+  "2026-11-20"
  ],
  "series": [
   {
@@ -1039,6 +1040,70 @@
    "warnings": [],
    "nav_total": 3084263450.17,
    "long_vs_nav": 1.010437
+  },
+  {
+   "as_of": "2026-11-20",
+   "fund": "3419.HK",
+   "official_coverage_pct_nav": 1.0044,
+   "nav_implied": 3027823138.19,
+   "source_url": "https://www.globalxetfs.com.hk/funds/covered-call-etf/",
+   "index_level": 22410.8,
+   "index_level_source": "upstream",
+   "equity_mv": 2011470557.44,
+   "index_etf_mv": 0.0,
+   "futures_notional": 1048602500.0,
+   "long_index_equiv": 3060073057.44,
+   "cash_mv": 54993600.0,
+   "other_mv": 0.0,
+   "short_call_contracts": 2714.0,
+   "short_call_mv": 0.0,
+   "short_call_spot_notional": 3041145560.0,
+   "short_call_strike_notional": 3243230000.0,
+   "coverage_spot": 0.993815,
+   "coverage_strike": 1.059854,
+   "coverage_delta_est": 0.0,
+   "delta_vol_assumed": 0.2,
+   "wavg_strike": 23900.0,
+   "wavg_moneyness": 0.06645,
+   "wavg_dte": 0.0,
+   "n_call_legs": 1,
+   "n_future_legs": 1,
+   "put_legs": [],
+   "call_legs": [
+    {
+     "name": "CALL HSI WEEKLY OPTIONS 11/20/26 23900",
+     "ticker": "",
+     "contracts": -2714.0,
+     "strike": 23900.0,
+     "expiry": "2026-11-20",
+     "multiplier": 50.0,
+     "market_value": 0.0,
+     "side": "short",
+     "delta_est": 0.0,
+     "dte": 0
+    }
+   ],
+   "future_legs": [
+    {
+     "name": "HANG SENG IDX FUT 11/27/26",
+     "ticker": "HIX6",
+     "contracts": 935.0,
+     "price": 22430.0,
+     "multiplier": 50.0,
+     "notional": 1048602500.0,
+     "expiry": "2026-11-27",
+     "market_value": -27113600.0
+    }
+   ],
+   "bucket_counts": {
+    "EQUITY": 95,
+    "CASH": 1,
+    "CALL_SHORT": 1,
+    "FUTURE_LONG": 1
+   },
+   "warnings": [],
+   "nav_total": 3027923817.25,
+   "long_vs_nav": 1.010618
   }
  ]
 }
