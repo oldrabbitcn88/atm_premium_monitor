@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-23T19:16:36+08:00",
+ "generated_at": "2026-11-25T19:43:49+08:00",
  "note": "备兑覆盖比率 = 卖出认购期权标的名义 / (正股市值+指数ETF市值+指数期货多头名义)",
  "upstream_repository": "oldrabbitcn88/3419-covered-call-monitor",
  "upstream_dates": [
@@ -19,7 +19,8 @@
   "2026-11-17",
   "2026-11-18",
   "2026-11-19",
-  "2026-11-20"
+  "2026-11-20",
+  "2026-11-24"
  ],
  "series": [
   {
@@ -1104,6 +1105,70 @@
    "warnings": [],
    "nav_total": 3027923817.25,
    "long_vs_nav": 1.010618
+  },
+  {
+   "as_of": "2026-11-24",
+   "fund": "3419.HK",
+   "official_coverage_pct_nav": 0.9997,
+   "nav_implied": 3016111338.4,
+   "source_url": "https://www.globalxetfs.com.hk/funds/covered-call-etf/",
+   "index_level": 22219.65,
+   "index_level_source": "upstream",
+   "equity_mv": 1994325953.49,
+   "index_etf_mv": 0.0,
+   "futures_notional": 1038457750.0,
+   "long_index_equiv": 3032783703.49,
+   "cash_mv": 55041600.0,
+   "other_mv": 0.0,
+   "short_call_contracts": 2714.0,
+   "short_call_mv": -8006300.0,
+   "short_call_spot_notional": 3015206505.0,
+   "short_call_strike_notional": 3066820000.0,
+   "coverage_spot": 0.994204,
+   "coverage_strike": 1.011223,
+   "coverage_delta_est": 0.175935,
+   "delta_vol_assumed": 0.2,
+   "wavg_strike": 22600.0,
+   "wavg_moneyness": 0.017118,
+   "wavg_dte": 3.0,
+   "n_call_legs": 1,
+   "n_future_legs": 1,
+   "put_legs": [],
+   "call_legs": [
+    {
+     "name": "CALL HANG SENG INDEX 11/27/26 22600",
+     "ticker": "HSI 11/27/26 C22600",
+     "contracts": -2714.0,
+     "strike": 22600.0,
+     "expiry": "2026-11-27",
+     "multiplier": 50.0,
+     "market_value": -8006300.0,
+     "side": "short",
+     "delta_est": 0.17696061819408426,
+     "dte": 3
+    }
+   ],
+   "future_legs": [
+    {
+     "name": "HANG SENG IDX FUT 11/27/26",
+     "ticker": "HIX6",
+     "contracts": 935.0,
+     "price": 22213.0,
+     "multiplier": 50.0,
+     "notional": 1038457750.0,
+     "expiry": "2026-11-27",
+     "market_value": -37258350.0
+    }
+   ],
+   "bucket_counts": {
+    "EQUITY": 95,
+    "CASH": 1,
+    "CALL_SHORT": 1,
+    "FUTURE_LONG": 1
+   },
+   "warnings": [],
+   "nav_total": 3015967423.06,
+   "long_vs_nav": 1.005576
   }
  ]
 }
